@@ -1,0 +1,154 @@
+import os
+import random
+import subprocess
+
+import numpy as np
+import torch
+from huggingface_hub import login
+from transformers import AutoModelForCausalLM, AutoTokenizer
+
+
+def enable_hf_offline_mode():
+    os.environ["HF_HUB_OFFLINE"] = "1"
+    os.environ["TRANSFORMERS_OFFLINE"] = "1"
+
+
+def safe_hf_login(token):
+    if not token:
+        print("Hugging Face login skipped: HF_TOKEN is not set")
+        return
+    try:
+        login(token)
+        print("Hugging Face login succeeded")
+    except Exception as exc:
+        enable_hf_offline_mode()
+        print(f"Hugging Face login skipped: {exc}")
+
+
+def is_network_error(exc):
+    msg = str(exc).lower()
+    return (
+        "name resolution" in msg
+        or "connecterror" in msg
+        or "connection error" in msg
+        or "temporary failure" in msg
+        or "offline" in msg
+    )
+
+
+def set_seed(seed):
+    random.seed(seed)
+    os.environ["PYTHONHASHSEED"] = str(seed)
+    np.random.seed(seed)
+    torch.manual_seed(seed)
+    if torch.cuda.is_available():
+        torch.cuda.manual_seed(seed)
+    torch.backends.cudnn.deterministic = True
+    torch.backends.cudnn.benchmark = False
+
+
+def most_free_cuda_device():
+    if not torch.cuda.is_available():
+        return "cpu"
+
+    try:
+        best_idx = 0
+        best_free = -1
+        for idx in range(torch.cuda.device_count()):
+            free_mem, _ = torch.cuda.mem_get_info(idx)
+            if free_mem > best_free:
+                best_idx = idx
+                best_free = free_mem
+        return f"cuda:{best_idx}"
+    except Exception as exc:
+        print(f"Could not query torch CUDA free memory: {exc}")
+
+    try:
+        result = subprocess.run(
+            [
+                "nvidia-smi",
+                "--query-gpu=index,memory.free",
+                "--format=csv,noheader,nounits",
+            ],
+            check=True,
+            capture_output=True,
+            text=True,
+        )
+        best_idx = None
+        best_free = -1
+        for line in result.stdout.splitlines():
+            parts = [part.strip() for part in line.split(",")]
+            if len(parts) != 2:
+                continue
+            idx = int(parts[0])
+            free_mem = int(parts[1])
+            if free_mem > best_free:
+                best_idx = idx
+                best_free = free_mem
+        if best_idx is not None:
+            return f"cuda:{best_idx}"
+    except Exception as exc:
+        print(f"Could not query nvidia-smi for free GPU memory: {exc}")
+
+    return "cuda:0"
+
+
+def resolve_model_device(requested_device):
+    if not torch.cuda.is_available():
+        return "cpu"
+    if requested_device in {"auto", "auto_free"}:
+        return most_free_cuda_device()
+    return requested_device
+
+
+def get_llm(model_name, cache_dir="llm_weights", device="cpu", seqlen=1024):
+    print("Loading model:", model_name)
+
+    try:
+        model = AutoModelForCausalLM.from_pretrained(
+            model_name,
+            dtype=torch.float16,
+            cache_dir=cache_dir,
+            low_cpu_mem_usage=True,
+            device_map=device,
+        )
+    except Exception as exc:
+        if not is_network_error(exc):
+            raise
+        enable_hf_offline_mode()
+        print(f"Falling back to local cached model files: {exc}")
+        model = AutoModelForCausalLM.from_pretrained(
+            model_name,
+            dtype=torch.float16,
+            cache_dir=cache_dir,
+            low_cpu_mem_usage=True,
+            device_map=device,
+            local_files_only=True,
+        )
+
+    if hasattr(model, "hf_device_map"):
+        print("hf_device_map = ", model.hf_device_map)
+
+    model.seqlen = int(seqlen)
+    return model
+
+
+def get_tokenizer(model_name, cache_dir):
+    try:
+        tokenizer = AutoTokenizer.from_pretrained(
+            model_name,
+            cache_dir=cache_dir,
+            use_fast=False,
+        )
+    except Exception as exc:
+        if not is_network_error(exc):
+            raise
+        enable_hf_offline_mode()
+        print(f"Falling back to local cached tokenizer files: {exc}")
+        tokenizer = AutoTokenizer.from_pretrained(
+            model_name,
+            cache_dir=cache_dir,
+            use_fast=False,
+            local_files_only=True,
+        )
+    return tokenizer
