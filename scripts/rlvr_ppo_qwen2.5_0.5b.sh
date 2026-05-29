@@ -5,14 +5,14 @@ python_bin="${PYTHON_BIN:-python}"
 if [ "$python_bin" = "python" ] && [ -x "/home/tans5/anaconda3/envs/prune_llm/bin/python" ]; then
     python_bin="/home/tans5/anaconda3/envs/prune_llm/bin/python"
 fi
-main_py="${MAIN_PY:-main.py}"
+main_py="${MAIN_PY:-main_rlvr.py}"
 export MPLCONFIGDIR="${MPLCONFIGDIR:-/tmp/matplotlib-$USER}"
 mkdir -p "$MPLCONFIGDIR"
 
-model="${MODEL:-Qwen/Qwen2.5-0.5B}"
+model="${MODEL:-llm_weights/rlvr_ppo_qwen2.5_0.5B_metamath_global_step_800}"
 cache_dir="${CACHE_DIR:-llm_weights}"
 calib_data="${CALIB_DATA:-c4}"
-output_root="${OUTPUT_ROOT:-out/qwen2.5_0.5b}"
+output_root="${OUTPUT_ROOT:-out/rlvr_ppo_qwen2.5_0.5b_metamath_global_step_800}"
 plot_only="${PLOT_ONLY:-0}"
 if [ "$plot_only" = "1" ] && [ -z "${RUN_NAME:-}" ]; then
     latest_run_root="$(ls -1dt "$output_root"/* 2>/dev/null | head -n 1 || true)"
@@ -40,7 +40,7 @@ run_magnitude="${RUN_MAGNITUDE:-1}"
 run_sparsegpt="${RUN_SPARSEGPT:-1}"
 run_pp_eval="${RUN_PP_EVAL:-1}"
 run_plots="${RUN_PLOTS:-1}"
-save_score_pkl="${SAVE_SCORE_PKL:-1}"
+save_score_pkl="${SAVE_SCORE_PKL:-0}"
 clear_results="${CLEAR_RESULTS:-1}"
 model_device="${MODEL_DEVICE:-auto_free}"
 

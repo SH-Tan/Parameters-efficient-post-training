@@ -1,14 +1,14 @@
-import torch
-from transformers import AutoModelForCausalLM, AutoTokenizer
-from collections import defaultdict
-import numpy as np
-import random
-import os
-import torch.fx as fx
+import argparse
 import inspect
+import os
+import random
+from collections import defaultdict
 
+import numpy as np
+import torch
+from transformers import AutoConfig, AutoModelForCausalLM, AutoTokenizer
 
-from huggingface_hub import login
+from huggingface_hub import login, snapshot_download
 login()
 
 print('# of gpus: ', torch.cuda.device_count())
@@ -29,21 +29,35 @@ os.environ['CUDA_VISIBLE_DEVICES'] = '0'
 device = "cuda" if torch.cuda.is_available() else "cpu"
 print(f"Using {device} device")
 
+cache_dir="llm_weights"
+
 # model_name = "mistralai/Mistral-7B-v0.1"
 # model_name = "meta-llama/Meta-Llama-3-8B"
 # model_name = "meta-llama/Llama-3.2-1B"
-model_name = "Qwen/Qwen2.5-0.5B"
+# model_name = "Qwen/Qwen2.5-0.5B"
+model_name = "ShuoZheLi/rlvr_ppo_qwen2.5_0.5B_metamath_global_step_800"
+
+snapshot_download(
+    repo_id="ShuoZheLi/rlvr_ppo_qwen2.5_0.5B_metamath_global_step_800",
+    local_dir=cache_dir + "/rlvr_ppo_qwen2.5_0.5B_metamath_global_step_800",
+)
 
 print("Loading model:", model_name)
 
-cache_dir="llm_weights"
 model = AutoModelForCausalLM.from_pretrained(
-    model_name,
-    dtype=torch.float16,
-    device_map="auto",
-    cache_dir=cache_dir, 
-    low_cpu_mem_usage=True, 
+    cache_dir + "/rlvr_ppo_qwen2.5_0.5B_metamath_global_step_800",
+    torch_dtype=torch.float16,
+    local_files_only=True,
+    device_map=device,
 )
+
+# model = AutoModelForCausalLM.from_pretrained(
+#     model_name,
+#     dtype=torch.float16,
+#     device_map="auto",
+#     cache_dir=cache_dir, 
+#     low_cpu_mem_usage=True, 
+# )
 
 model.to(device)
 
