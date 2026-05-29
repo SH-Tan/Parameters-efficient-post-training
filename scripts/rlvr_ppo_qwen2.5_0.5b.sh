@@ -11,7 +11,7 @@ mkdir -p "$MPLCONFIGDIR"
 
 model="${MODEL:-llm_weights/rlvr_ppo_qwen2.5_0.5B_metamath_global_step_800}"
 cache_dir="${CACHE_DIR:-llm_weights}"
-calib_data="${CALIB_DATA:-MetaMathQA-math-500}"
+calib_data="${CALIB_DATA:-c4}"
 output_root="${OUTPUT_ROOT:-out/rlvr_ppo_qwen2.5_0.5b_metamath_global_step_800}"
 plot_only="${PLOT_ONLY:-0}"
 if [ "$plot_only" = "1" ] && [ -z "${RUN_NAME:-}" ]; then
@@ -40,7 +40,7 @@ run_magnitude="${RUN_MAGNITUDE:-1}"
 run_sparsegpt="${RUN_SPARSEGPT:-1}"
 run_pp_eval="${RUN_PP_EVAL:-1}"
 run_plots="${RUN_PLOTS:-1}"
-save_score_pkl="${SAVE_SCORE_PKL:-0}"
+save_score_pkl="${SAVE_SCORE_PKL:-1}"
 clear_results="${CLEAR_RESULTS:-1}"
 model_device="${MODEL_DEVICE:-auto_free}"
 

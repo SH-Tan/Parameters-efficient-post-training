@@ -68,6 +68,14 @@ Outputs:
 - similarity heatmap PNG
 - optional per-method layer/op heatmaps showing selected ratios
 
+Generate compact per-layer score heatmaps and a top-50% similarity/shift report:
+
+```sh
+sh load_score/scripts/qwen_compare_scores.sh
+```
+
+This writes small `heatmap_*.png` files and `similarity_shift_report.txt`.
+
 ## Scripts
 
 Select masks for each method:
