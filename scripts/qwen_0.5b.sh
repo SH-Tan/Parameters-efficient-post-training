@@ -11,7 +11,7 @@ mkdir -p "$MPLCONFIGDIR"
 
 model="${MODEL:-Qwen/Qwen2.5-0.5B}"
 cache_dir="${CACHE_DIR:-llm_weights}"
-calib_data="${CALIB_DATA:-c4}"
+calib_data="${CALIB_DATA:-MetaMathQA-math-500}"
 output_root="${OUTPUT_ROOT:-out/qwen2.5_0.5b}"
 plot_only="${PLOT_ONLY:-0}"
 if [ "$plot_only" = "1" ] && [ -z "${RUN_NAME:-}" ]; then

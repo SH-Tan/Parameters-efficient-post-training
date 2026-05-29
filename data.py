@@ -57,6 +57,21 @@ def _metamathqa_text(row, include_response=True):
     query = row.get("query") or row.get("problem") or row.get("question")
     response = row.get("response") or row.get("solution") or row.get("answer")
     original_question = row.get("original_question")
+    prompt = row.get("prompt")
+    reward_model = row.get("reward_model")
+
+    if not query and prompt:
+        if isinstance(prompt, list):
+            query = "\n".join(
+                str(item.get("content", ""))
+                for item in prompt
+                if isinstance(item, dict) and item.get("content")
+            )
+        else:
+            query = str(prompt)
+
+    if include_response and not response and isinstance(reward_model, dict):
+        response = reward_model.get("ground_truth")
 
     parts = []
     if original_question and original_question != query:
@@ -94,13 +109,14 @@ def get_c4(nsamples, seed, seqlen, tokenizer):
 
 
 def get_metamathqa_math_500(nsamples, seed, seqlen, tokenizer):
-    dataset = load_dataset("ShuoZheLi/MetaMathQA-math-500", split="test")
+    dataset = load_dataset("ShuoZheLi/MetaMathQA-math-500", split="train")
     texts = (_metamathqa_text(row, include_response=True) for row in dataset)
     token_buffer = _build_token_buffer_from_texts(texts, tokenizer, nsamples * seqlen)
     trainloader = _sample_from_token_buffer(token_buffer, nsamples, seqlen, seed)
 
-    eval_texts = [_metamathqa_text(row, include_response=False) for row in dataset]
-    valenc = TokenizerWrapper(tokenizer("\n\n".join(eval_texts), return_tensors="pt").input_ids)
+    eval_dataset = load_dataset("ShuoZheLi/MetaMathQA-math-500", split="test")
+    eval_text = "\n\n".join(_metamathqa_text(row, include_response=False) for row in eval_dataset)
+    valenc = TokenizerWrapper(tokenizer(eval_text, return_tensors="pt").input_ids)
     return trainloader, valenc
 
 

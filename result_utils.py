@@ -249,6 +249,55 @@ def draw_run_comparison_plots(
     return drawn_paths
 
 
+def draw_dataset_comparisons(
+    dataset_runs,
+    output_dir,
+    seq_len,
+    methods=("wanda", "magnitude", "sparsegpt"),
+    score_orders=("global", "local", "per_op"),
+    max_sparsity=0.5,
+    pp_seq_len=1024,
+):
+    drawn_paths = []
+    for method in methods:
+        rows_by_dataset = []
+        for calib_data, run_root in dataset_runs:
+            csv_path = method_result_csv(run_root, method, calib_data, seq_len)
+            rows = load_result_rows(csv_path)
+            if rows:
+                rows_by_dataset.append((calib_data, rows))
+
+        if len(rows_by_dataset) < 2:
+            continue
+
+        for score_order in score_orders:
+            series = [
+                (
+                    calib_data,
+                    _filtered_points(
+                        rows,
+                        method=method,
+                        score_order=score_order,
+                        pp_seq_len=pp_seq_len,
+                        max_sparsity=max_sparsity,
+                    ),
+                )
+                for calib_data, rows in rows_by_dataset
+            ]
+            plot_path = os.path.join(
+                output_dir,
+                f"{method}_{score_order}_dataset_compare_to_{max_sparsity:g}.png",
+            )
+            drawn_path = _draw_series(
+                plot_path,
+                f"{method} {score_order} dataset comparison, seq_len={pp_seq_len}",
+                series,
+            )
+            if drawn_path is not None:
+                drawn_paths.append(drawn_path)
+    return drawn_paths
+
+
 def draw_pp_vs_sparsity(csv_path, plot_path):
     rows = load_result_rows(csv_path)
     if not rows:

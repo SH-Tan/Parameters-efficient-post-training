@@ -126,51 +126,52 @@ def run_score_eval(args, score_dir):
             )
             current_model_device = resolve_model_device(args.model_device)
             current_model = get_llm(args.model, args.cache_dir, current_model_device, args.seqlen)
-            current_model.eval()
-            if target_sparsity > 0:
-                summary = prune_by_scores(current_model, score_dir, target_sparsity, score_order)
-                print(
-                    f"score prune summary: {summary['pruned']}/{summary['total']} "
-                    f"({summary['actual_sparsity']:.4f})"
-                )
+            try:
+                current_model.eval()
+                if target_sparsity > 0:
+                    summary = prune_by_scores(current_model, score_dir, target_sparsity, score_order)
+                    print(
+                        f"score prune summary: {summary['pruned']}/{summary['total']} "
+                        f"({summary['actual_sparsity']:.4f})"
+                    )
 
-            actual_sparsity = check_sparsity(current_model)
-            ppl_by_seq = []
-            for seq_len in eval_seq_lens:
-                current_model.seqlen = int(seq_len)
-                ppl_test = eval_ppl_with_loader(current_model, eval_loader, current_model_device)
-                ppl_by_seq.append((int(seq_len), ppl_test))
-                print(
-                    f"wikitext perplexity {ppl_test} using score_order={score_order}, "
-                    f"target_sparsity={target_sparsity:.4f}, pp_seqlen={seq_len}"
-                )
-                append_pp_result(
-                    pp_log_path,
-                    args.prune_method,
-                    score_order,
-                    target_sparsity,
-                    actual_sparsity,
-                    int(seq_len),
-                    ppl_test,
-                )
-                append_result_csv(
-                    result_csv_path,
-                    {
-                        "method": args.prune_method,
-                        "score_order": score_order,
-                        "target_sparsity": f"{target_sparsity:.6f}",
-                        "actual_sparsity": f"{actual_sparsity:.6f}",
-                        "pp_seq_len": int(seq_len),
-                        "ppl_test": f"{ppl_test:.6f}",
-                    },
-                )
+                actual_sparsity = check_sparsity(current_model)
+                ppl_by_seq = []
+                for seq_len in eval_seq_lens:
+                    current_model.seqlen = int(seq_len)
+                    ppl_test = eval_ppl_with_loader(current_model, eval_loader, current_model_device)
+                    ppl_by_seq.append((int(seq_len), ppl_test))
+                    print(
+                        f"wikitext perplexity {ppl_test} using score_order={score_order}, "
+                        f"target_sparsity={target_sparsity:.4f}, pp_seqlen={seq_len}"
+                    )
+                    append_pp_result(
+                        pp_log_path,
+                        args.prune_method,
+                        score_order,
+                        target_sparsity,
+                        actual_sparsity,
+                        int(seq_len),
+                        ppl_test,
+                    )
+                    append_result_csv(
+                        result_csv_path,
+                        {
+                            "method": args.prune_method,
+                            "score_order": score_order,
+                            "target_sparsity": f"{target_sparsity:.6f}",
+                            "actual_sparsity": f"{actual_sparsity:.6f}",
+                            "pp_seq_len": int(seq_len),
+                            "ppl_test": f"{ppl_test:.6f}",
+                        },
+                    )
 
-            if target_sparsity == 0:
-                dense_eval_cache = (actual_sparsity, ppl_by_seq)
-
-            del current_model
-            if torch.cuda.is_available():
-                torch.cuda.empty_cache()
+                if target_sparsity == 0:
+                    dense_eval_cache = (actual_sparsity, ppl_by_seq)
+            finally:
+                del current_model
+                if torch.cuda.is_available():
+                    torch.cuda.empty_cache()
 
     drawn_path = draw_pp_vs_sparsity(result_csv_path, plot_path)
     if drawn_path is not None:
