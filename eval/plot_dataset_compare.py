@@ -2,7 +2,7 @@ import argparse
 import os
 import sys
 
-from result_utils import draw_dataset_comparisons
+from eval.result_utils import draw_dataset_comparisons
 
 os.environ.setdefault("MPLCONFIGDIR", f"/tmp/matplotlib-{os.environ.get('USER', 'user')}")
 os.environ.setdefault("XDG_CACHE_HOME", f"/tmp/xdg-cache-{os.environ.get('USER', 'user')}")

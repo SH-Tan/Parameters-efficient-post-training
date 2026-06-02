@@ -3,8 +3,8 @@ import os
 
 import torch
 
-from entry_utils import add_common_prune_args, run_prune_args
-from model_utils import safe_hf_login, set_seed
+from utils.entry_utils import add_common_prune_args, run_prune_args
+from utils.model_utils import safe_hf_login, set_seed
 
 
 def build_parser():

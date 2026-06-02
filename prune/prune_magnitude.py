@@ -1,7 +1,7 @@
 import torch
 
 from prune import find_layers
-from score_io_utils import save_layer_scores_pkl
+from utils.score_io_utils import save_layer_scores_pkl
 
 
 def compute_magnitude_scores(model, save_dir=None):

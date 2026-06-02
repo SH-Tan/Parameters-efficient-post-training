@@ -7,7 +7,7 @@ The repo currently supports:
 - Models: `Qwen/Qwen2.5-0.5B` and the local RLVR PPO Qwen checkpoint.
 - Pruning scores: WANDA, magnitude, and SparseGPT.
 - Score ordering: global, local per layer, and per operation.
-- Evaluation: perplexity results saved as CSV plus comparison plots up to a target sparsity.
+- Evaluation: perplexity results saved as CSV plus optional downstream task accuracy.
 - Score analysis: load saved score PKLs, select low/high score parameters, and compare score similarity.
 
 ## Layout
@@ -17,12 +17,10 @@ main.py                         # Qwen entrypoint
 main_rlvr.py                    # RLVR checkpoint entrypoint
 scripts/qwen_0.5b.sh            # Qwen run script
 scripts/rlvr_ppo_qwen2.5_0.5b.sh # RLVR run script
-prune_wanda.py                  # WANDA score collection
-prune_magnitude.py              # magnitude score collection
-prune_sparsegpt.py              # SparseGPT score collection
-score_prune_utils.py            # prune by saved scores
-result_utils.py                 # plot helpers
-plot_results.py                 # plot CLI
+prune/                          # pruning methods and score pruning utilities
+eval/                           # calibration data, perplexity eval, and plot CLIs
+utils/                          # model loading, entry args, and score IO helpers
+downstream_eval/                # downstream task accuracy helpers
 load_score/                     # saved score selection and analysis
 out/                            # run outputs
 llm_weights/                    # local/downloaded model weights
@@ -40,6 +38,9 @@ Common overrides:
 
 ```sh
 CALIB_DATA=c4 \
+PP_EVAL_DATA=wikitext2 \
+RUN_PP_EVAL=1 \
+RUN_DOWNSTREAM_EVAL=0 \
 SCORE_ORDERS="global local per_op" \
 SPARSITY_RATIOS="0 0.1 0.3 0.5" \
 SAVE_SCORE_PKL=1 \
@@ -85,7 +86,9 @@ Important files:
 ```text
 run.log
 results/<calib_data>/seq_len_<N>/pp_eval_results.csv
-results/<calib_data>/seq_len_<N>/pp_eval_<method>.txt
+results/<calib_data>/seq_len_<N>/downstream_task_results.csv
+results/<calib_data>/seq_len_<N>/pp_vs_sparsity.png
+results/<calib_data>/seq_len_<N>/accuracy_vs_sparsity.png
 plots/<calib_data>/seq_len_<N>/*.png
 <method>/<calib_data>/seq_len_<N>/layer_000.pkl   # saved score PKLs
 ```
@@ -103,7 +106,7 @@ PLOT_ONLY=1 RUN_NAME=<run_name> sh scripts/qwen_0.5b.sh
 Or call the plot CLI directly:
 
 ```sh
-python plot_results.py \
+python -m eval.plot_results \
   --run_root out/qwen2.5_0.5b/<run_name> \
   --calib_data c4 \
   --seq_len 1024 \
@@ -114,7 +117,7 @@ python plot_results.py \
 Compare calibration datasets for the same model:
 
 ```sh
-python plot_dataset_compare.py \
+python -m eval.plot_dataset_compare \
   --dataset_run c4=out/qwen2.5_0.5b/<c4_run_name> \
   --dataset_run MetaMathQA-math-500=out/qwen2.5_0.5b/<metamath_run_name> \
   --output_dir out/qwen2.5_0.5b/dataset_compare \
@@ -155,7 +158,13 @@ See [load_score/README.md](load_score/README.md) for details.
 
 ## Main Options
 
-- `CALIB_DATA`: `c4`, `wikitext2`, `MetaMathQA-math-500`, `metamathqa_math_500`, or `math_500`.
+- `CALIB_DATA`: `c4`/`c4_train`, `c4_test`/`c4_validation`, `MetaMathQA-math-500`, `metamathqa_math_500`, or `math_500`.
+- `PP_EVAL_DATA`: `wikitext2` or `c4_test`/`c4_validation`.
+- `c4_test` and `c4_validation` map to the Hugging Face `allenai/c4` `validation` split. PPL eval streams a deterministic spread sample of 3000 validation rows, independent of run seed, instead of materializing the split in memory.
+- `RUN_PP_EVAL`: set to `0` to skip perplexity evaluation.
+- `RUN_DOWNSTREAM_EVAL`: set to `1` to run downstream task accuracy after pruning.
+- `DOWNSTREAM_TASK_DATA`: parquet dataset path for downstream task accuracy.
+- `DOWNSTREAM_MAX_EXAMPLES`: number of downstream examples to generate/score.
 - `SCORE_ORDERS`: one or more of `global`, `local`, `per_op`.
 - `SPARSITY_RATIOS`: sparsity levels to evaluate.
 - `NSAMPLES`: calibration sample count.

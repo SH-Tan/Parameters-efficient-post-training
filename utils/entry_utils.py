@@ -1,10 +1,9 @@
-import tempfile
-
-from run_utils import run_score_eval, score_save_dir
+from eval.run_utils import run_score_eval, score_save_dir
 
 
 PRUNE_METHODS = ["wanda", "magnitude", "sparsegpt"]
-CALIB_DATASETS = ["c4", "wikitext2", "metamathqa_math_500", "MetaMathQA-math-500", "math_500"]
+CALIB_DATASETS = ["c4", "c4_train", "c4_test", "c4_validation", "metamathqa_math_500", "MetaMathQA-math-500", "math_500"]
+PP_EVAL_DATASETS = ["wikitext2", "c4_test", "c4_validation"]
 SCORE_ORDERS = ["global", "local", "per_op"]
 
 
@@ -45,6 +44,13 @@ def add_common_prune_args(parser, require_model=True, default_model=None, model_
     )
     parser.add_argument("--seqlen", type=int, default=1024, help="Calibration sequence length.")
     parser.add_argument(
+        "--pp_eval_data",
+        type=str,
+        default="wikitext2",
+        choices=PP_EVAL_DATASETS,
+        help="Dataset for perplexity evaluation.",
+    )
+    parser.add_argument(
         "--pp_seqlen",
         type=int,
         nargs="*",
@@ -52,24 +58,43 @@ def add_common_prune_args(parser, require_model=True, default_model=None, model_
         help="Perplexity eval sequence lengths. Defaults to --seqlen.",
     )
     parser.add_argument("--skip_pp_eval", action="store_true", help="Only save scores; skip PPL eval.")
+    parser.add_argument("--do_downstream_eval", action="store_true", help="Run downstream task accuracy after pruning.")
+    parser.add_argument(
+        "--downstream_task_data",
+        default="ShuoZheLi/MetaMathQA-math-500",
+        help="Local parquet path or Hugging Face dataset ID for downstream task accuracy.",
+    )
+    parser.add_argument("--downstream_prompt_key", default="prompt")
+    parser.add_argument("--downstream_response_key", default=None)
+    parser.add_argument("--downstream_reward_score_dir", default=None)
+    parser.add_argument("--downstream_max_examples", type=int, default=500, help="Use -1 for all downstream examples.")
+    parser.add_argument("--downstream_start_index", type=int, default=0)
+    parser.add_argument("--downstream_shuffle", action="store_true")
+    parser.add_argument("--downstream_max_prompt_length", type=int, default=2048)
+    parser.add_argument("--downstream_max_new_tokens", type=int, default=2048)
+    parser.add_argument("--downstream_temperature", type=float, default=0.0)
+    parser.add_argument("--downstream_top_p", type=float, default=1.0)
+    parser.add_argument("--downstream_top_k", type=int, default=0)
     parser.add_argument(
         "--save_score_pkl",
         dest="save_score_pkl",
         action="store_true",
-        default=True,
+        default=False,
         help="Persist per-layer score PKLs.",
     )
     parser.add_argument(
         "--no_save_score_pkl",
         dest="save_score_pkl",
         action="store_false",
-        help="Use a temporary score directory and remove PKLs after the run.",
+        help="Recompute scores in memory without saving or loading score PKLs.",
     )
 
 
 def run_prune_args(args):
     if args.save_score_pkl:
-        run_score_eval(args, score_save_dir(args))
+        score_dir = score_save_dir(args)
+        print(f"Using persistent score directory: {score_dir}")
+        run_score_eval(args, score_dir)
     else:
-        with tempfile.TemporaryDirectory(prefix=f"{args.prune_method}_scores_") as tmp_dir:
-            run_score_eval(args, tmp_dir)
+        print(f"Using in-memory recomputed {args.prune_method} scores; no score PKLs will be loaded or saved.")
+        run_score_eval(args, None)

@@ -4,8 +4,8 @@ from pathlib import Path
 
 import torch
 
-from entry_utils import add_common_prune_args, run_prune_args
-from model_utils import safe_hf_login, set_seed
+from utils.entry_utils import add_common_prune_args, run_prune_args
+from utils.model_utils import safe_hf_login, set_seed
 
 
 DEFAULT_CHECKPOINT = "llm_weights/rlvr_ppo_qwen2.5_0.5B_metamath_global_step_800"

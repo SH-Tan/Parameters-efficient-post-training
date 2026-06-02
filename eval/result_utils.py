@@ -8,25 +8,42 @@ def result_dir(args):
     return path
 
 
-def append_pp_result(log_path, method, score_order, target_sparsity, actual_sparsity, pp_seq_len, ppl):
-    with open(log_path, "a+", encoding="utf-8") as f:
-        print(
-            f"{method:<12}{score_order:<12}{target_sparsity:<18.4f}"
-            f"{actual_sparsity:<18.4f}{pp_seq_len:<12d}{ppl:<12.4f}",
-            file=f,
-            flush=True,
-        )
-
-
 def append_result_csv(csv_path, row):
     has_header = os.path.exists(csv_path) and os.path.getsize(csv_path) > 0
     fieldnames = [
+        "seed",
         "method",
         "score_order",
         "target_sparsity",
         "actual_sparsity",
+        "pp_eval_data",
         "pp_seq_len",
         "ppl_test",
+    ]
+    with open(csv_path, "a+", newline="", encoding="utf-8") as f:
+        writer = csv.DictWriter(f, fieldnames=fieldnames)
+        if not has_header:
+            writer.writeheader()
+        writer.writerow(row)
+
+
+def append_downstream_result_csv(csv_path, row):
+    has_header = os.path.exists(csv_path) and os.path.getsize(csv_path) > 0
+    fieldnames = [
+        "seed",
+        "method",
+        "score_order",
+        "target_sparsity",
+        "actual_sparsity",
+        "task_data",
+        "num_examples",
+        "num_scored",
+        "num_unscored",
+        "accuracy",
+        "pass@1",
+        "mean_score",
+        "score_sum",
+        "num_correct",
     ]
     with open(csv_path, "a+", newline="", encoding="utf-8") as f:
         writer = csv.DictWriter(f, fieldnames=fieldnames)
@@ -60,10 +77,30 @@ def method_result_csv(run_root, method, calib_data, seq_len):
     )
 
 
+def method_downstream_csv(run_root, method, calib_data, seq_len):
+    return os.path.join(
+        run_root,
+        method,
+        "results",
+        calib_data,
+        f"seq_len_{seq_len}",
+        "downstream_task_results.csv",
+    )
+
+
 def existing_method_result_csvs(run_root, methods, calib_data, seq_len):
     csv_paths = []
     for method in methods:
         csv_path = method_result_csv(run_root, method, calib_data, seq_len)
+        if os.path.exists(csv_path):
+            csv_paths.append(csv_path)
+    return csv_paths
+
+
+def existing_method_downstream_csvs(run_root, methods, calib_data, seq_len):
+    csv_paths = []
+    for method in methods:
+        csv_path = method_downstream_csv(run_root, method, calib_data, seq_len)
         if os.path.exists(csv_path):
             csv_paths.append(csv_path)
     return csv_paths
@@ -104,7 +141,26 @@ def _filtered_points(rows, method=None, score_order=None, pp_seq_len=None, max_s
     return sorted(points)
 
 
-def _draw_series(plot_path, title, series, y_log=True, annotate_actual=True):
+def _filtered_accuracy_points(rows, method=None, score_order=None, max_sparsity=None):
+    points = []
+    for row in rows:
+        if method is not None and row.get("method") != method:
+            continue
+        if score_order is not None and row.get("score_order") != score_order:
+            continue
+
+        sparsity = _float_row_value(row, "target_sparsity")
+        accuracy = _float_row_value(row, "accuracy")
+        actual_sparsity = _float_row_value(row, "actual_sparsity")
+        if sparsity is None or accuracy is None:
+            continue
+        if max_sparsity is not None and sparsity > max_sparsity:
+            continue
+        points.append((sparsity, accuracy, actual_sparsity))
+    return sorted(points)
+
+
+def _draw_series(plot_path, title, series, y_log=True, annotate_actual=True, ylabel="Perplexity"):
     series = [(label, points) for label, points in series if points]
     if not series:
         return None
@@ -137,7 +193,7 @@ def _draw_series(plot_path, title, series, y_log=True, annotate_actual=True):
     if y_log:
         plt.yscale("log")
     plt.xlabel("Target sparsity")
-    plt.ylabel("Perplexity" + (", log scale" if y_log else ""))
+    plt.ylabel(ylabel + (", log scale" if y_log else ""))
     plt.title(title)
     plt.grid(True, which="both", linewidth=0.4, alpha=0.35)
     plt.legend(fontsize=8)
@@ -226,26 +282,69 @@ def draw_run_comparison_plots(
     pp_seq_len=1024,
 ):
     csv_paths = existing_method_result_csvs(run_root, methods, calib_data, seq_len)
-    if not csv_paths:
-        return []
     output_dir = os.path.join(run_root, "plots", calib_data, f"seq_len_{seq_len}")
     drawn_paths = []
-    drawn_paths.extend(
-        draw_score_order_comparisons(
-            csv_paths,
-            output_dir,
-            max_sparsity=max_sparsity,
-            pp_seq_len=pp_seq_len,
+    if csv_paths:
+        drawn_paths.extend(
+            draw_score_order_comparisons(
+                csv_paths,
+                output_dir,
+                max_sparsity=max_sparsity,
+                pp_seq_len=pp_seq_len,
+            )
         )
-    )
-    drawn_paths.extend(
-        draw_method_comparisons(
-            csv_paths,
-            output_dir,
-            max_sparsity=max_sparsity,
-            pp_seq_len=pp_seq_len,
+        drawn_paths.extend(
+            draw_method_comparisons(
+                csv_paths,
+                output_dir,
+                max_sparsity=max_sparsity,
+                pp_seq_len=pp_seq_len,
+            )
         )
-    )
+    downstream_csv_paths = existing_method_downstream_csvs(run_root, methods, calib_data, seq_len)
+    if downstream_csv_paths:
+        drawn_paths.extend(
+            draw_accuracy_method_comparisons(
+                downstream_csv_paths,
+                output_dir,
+                max_sparsity=max_sparsity,
+            )
+        )
+    return drawn_paths
+
+
+def draw_accuracy_method_comparisons(
+    csv_paths,
+    output_dir,
+    max_sparsity=0.5,
+    score_orders=("global", "local", "per_op"),
+):
+    rows = load_result_rows_many(csv_paths)
+    methods = sorted({row.get("method") for row in rows if row.get("method")})
+    drawn_paths = []
+    for score_order in score_orders:
+        series = [
+            (
+                method,
+                _filtered_accuracy_points(
+                    rows,
+                    method=method,
+                    score_order=score_order,
+                    max_sparsity=max_sparsity,
+                ),
+            )
+            for method in methods
+        ]
+        plot_path = os.path.join(output_dir, f"{score_order}_accuracy_vs_sparsity_to_{max_sparsity:g}.png")
+        drawn_path = _draw_series(
+            plot_path,
+            f"{score_order} accuracy comparison",
+            series,
+            y_log=False,
+            ylabel="Accuracy",
+        )
+        if drawn_path is not None:
+            drawn_paths.append(drawn_path)
     return drawn_paths
 
 
@@ -316,6 +415,7 @@ def draw_pp_vs_sparsity(csv_path, plot_path):
             (float(row["target_sparsity"]), float(row["ppl_test"]))
         )
 
+    os.makedirs(os.path.dirname(plot_path), exist_ok=True)
     plt.figure(figsize=(8, 5), dpi=150)
     for (method, score_order, pp_seq_len), values in sorted(series.items()):
         values = sorted(values)
@@ -330,6 +430,50 @@ def draw_pp_vs_sparsity(csv_path, plot_path):
     plt.xlabel("Sparsity")
     plt.ylabel("Perplexity")
     plt.title("PP vs Sparsity")
+    plt.grid(True, linewidth=0.4, alpha=0.4)
+    plt.legend(fontsize=8)
+    plt.tight_layout()
+    plt.savefig(plot_path)
+    plt.close()
+    return plot_path
+
+
+def draw_accuracy_vs_sparsity(csv_path, plot_path):
+    rows = load_result_rows(csv_path)
+    if not rows:
+        return None
+
+    try:
+        import matplotlib.pyplot as plt
+    except ImportError:
+        print("matplotlib is not installed; skipping plot.")
+        return None
+
+    series = {}
+    for row in rows:
+        accuracy = _float_row_value(row, "accuracy")
+        if accuracy is None:
+            continue
+        key = (row["method"], row["score_order"])
+        series.setdefault(key, []).append((float(row["target_sparsity"]), accuracy))
+    if not series:
+        return None
+
+    os.makedirs(os.path.dirname(plot_path), exist_ok=True)
+    plt.figure(figsize=(8, 5), dpi=150)
+    for (method, score_order), values in sorted(series.items()):
+        values = sorted(values)
+        plt.plot(
+            [item[0] for item in values],
+            [item[1] for item in values],
+            marker="o",
+            linewidth=1.5,
+            label=f"{method}-{score_order}",
+        )
+
+    plt.xlabel("Sparsity")
+    plt.ylabel("Accuracy")
+    plt.title("Accuracy vs Sparsity")
     plt.grid(True, linewidth=0.4, alpha=0.4)
     plt.legend(fontsize=8)
     plt.tight_layout()

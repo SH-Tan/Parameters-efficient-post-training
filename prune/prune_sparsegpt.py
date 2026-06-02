@@ -1,10 +1,10 @@
 import torch
 
-from data import get_loaders
+from eval.data import get_loaders
 from prune import as_device, find_layers, prepare_calibration_input
-from score_io_utils import save_layer_scores_pkl
-from sparsegpt_utils import SparseGPT
-from wanda_utils import layer_forward
+from prune.sparsegpt_utils import SparseGPT
+from prune.wanda_utils import layer_forward
+from utils.score_io_utils import save_layer_scores_pkl
 
 
 def compute_sparsegpt_scores(args, model, tokenizer, device=torch.device("cuda:0"), save_dir=None):

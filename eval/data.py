@@ -8,6 +8,37 @@ class TokenizerWrapper:
         self.input_ids = input_ids
 
 
+class StreamingTextEvalWrapper:
+    def __init__(self, dataset, tokenizer, seqlen, text_key="text", row_indices=None):
+        self.dataset = dataset
+        self.tokenizer = tokenizer
+        self.seqlen = int(seqlen)
+        self.text_key = text_key
+        self.row_indices = None if row_indices is None else set(row_indices)
+        self.max_row_index = None if self.row_indices is None else max(self.row_indices)
+
+    def iter_input_ids(self):
+        token_buffer = torch.empty(0, dtype=torch.long)
+        for row_idx, sample in enumerate(self.dataset):
+            if self.row_indices is not None and row_idx not in self.row_indices:
+                if row_idx <= self.max_row_index:
+                    continue
+                break
+
+            text = sample.get(self.text_key, "")
+            if not text:
+                continue
+
+            input_ids = self.tokenizer(text, return_tensors="pt").input_ids[0]
+            if input_ids.numel() == 0:
+                continue
+
+            token_buffer = torch.cat((token_buffer, input_ids), dim=0)
+            while token_buffer.numel() >= self.seqlen:
+                yield token_buffer[: self.seqlen].unsqueeze(0)
+                token_buffer = token_buffer[self.seqlen :]
+
+
 def _sample_from_token_buffer(token_buffer, nsamples, seqlen, seed):
     total_tokens = token_buffer.shape[1]
     if total_tokens < seqlen:
@@ -93,12 +124,34 @@ def get_wikitext2(nsamples, seed, seqlen, tokenizer):
     return trainloader, testenc
 
 
-def get_c4(nsamples, seed, seqlen, tokenizer):
-    random.seed(seed)
-    
-    traindata = load_dataset(
-        'allenai/c4', data_files={'train': 'en/c4-train.00000-of-01024.json.gz'}, split='train'
+def _load_c4_split(split_name):
+    if split_name == "train":
+        return load_dataset(
+            "allenai/c4",
+            "en",
+            split="train",
+            streaming=True,
         )
+    if split_name == "test":
+        return load_dataset(
+            "allenai/c4",
+            "en",
+            split="validation",
+            streaming=True,
+        )
+    raise ValueError(f"Unsupported C4 split: {split_name}")
+
+
+def _spread_indices(total_rows, sample_rows):
+    if sample_rows >= total_rows:
+        return list(range(total_rows))
+    return sorted({int(index * total_rows / sample_rows) for index in range(sample_rows)})
+
+
+def get_c4(nsamples, seed, seqlen, tokenizer, split_name="train"):
+    random.seed(seed)
+
+    traindata = _load_c4_split(split_name)
     trainenc = _build_token_buffer_from_texts(
         (sample["text"] for sample in traindata), tokenizer, nsamples * seqlen
     )
@@ -106,6 +159,16 @@ def get_c4(nsamples, seed, seqlen, tokenizer):
 
     valenc = None
     return trainloader, valenc
+
+
+def get_c4_eval(seqlen, tokenizer, sample_rows=3000, total_rows=364608):
+    dataset = load_dataset("allenai/c4", "en", split="validation", streaming=True)
+    return StreamingTextEvalWrapper(
+        dataset,
+        tokenizer,
+        seqlen,
+        row_indices=_spread_indices(total_rows, sample_rows),
+    )
 
 
 def get_metamathqa_math_500(nsamples, seed, seqlen, tokenizer):
@@ -123,8 +186,10 @@ def get_metamathqa_math_500(nsamples, seed, seqlen, tokenizer):
 def get_loaders(name, nsamples=128, seed=0, seqlen=2048, tokenizer=None):
     if 'wikitext2' in name:
         return get_wikitext2(nsamples, seed, seqlen, tokenizer)
-    if "c4" in name:
-        return get_c4(nsamples, seed, seqlen, tokenizer)
+    if name in {"c4", "c4_train"}:
+        return get_c4(nsamples, seed, seqlen, tokenizer, split_name="train")
+    if name in {"c4_test", "c4_validation"}:
+        return get_c4(nsamples, seed, seqlen, tokenizer, split_name="test")
     if name in {"metamathqa_math_500", "MetaMathQA-math-500", "math_500"}:
         return get_metamathqa_math_500(nsamples, seed, seqlen, tokenizer)
     raise ValueError(f"Unsupported dataset name: {name}")
