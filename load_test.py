@@ -32,10 +32,10 @@ print(f"Using {device} device")
 cache_dir="llm_weights"
 
 # model_name = "mistralai/Mistral-7B-v0.1"
-# model_name = "meta-llama/Meta-Llama-3-8B"
+model_name = "meta-llama/Meta-Llama-3-8B"
 # model_name = "meta-llama/Llama-3.2-1B"
 # model_name = "Qwen/Qwen2.5-0.5B"
-model_name = "ShuoZheLi/rlvr_ppo_qwen2.5_0.5B_metamath_global_step_800"
+# model_name = "ShuoZheLi/rlvr_ppo_qwen2.5_0.5B_metamath_global_step_800"
 
 snapshot_download(
     repo_id="ShuoZheLi/rlvr_ppo_qwen2.5_0.5B_metamath_global_step_800",
@@ -44,20 +44,20 @@ snapshot_download(
 
 print("Loading model:", model_name)
 
-model = AutoModelForCausalLM.from_pretrained(
-    cache_dir + "/rlvr_ppo_qwen2.5_0.5B_metamath_global_step_800",
-    torch_dtype=torch.float16,
-    local_files_only=True,
-    device_map=device,
-)
-
 # model = AutoModelForCausalLM.from_pretrained(
-#     model_name,
-#     dtype=torch.float16,
-#     device_map="auto",
-#     cache_dir=cache_dir, 
-#     low_cpu_mem_usage=True, 
+#     cache_dir + "/rlvr_ppo_qwen2.5_0.5B_metamath_global_step_800",
+#     torch_dtype=torch.float16,
+#     local_files_only=True,
+#     device_map=device,
 # )
+
+model = AutoModelForCausalLM.from_pretrained(
+    model_name,
+    dtype=torch.float16,
+    device_map="auto",
+    cache_dir=cache_dir, 
+    low_cpu_mem_usage=True, 
+)
 
 model.to(device)
 
