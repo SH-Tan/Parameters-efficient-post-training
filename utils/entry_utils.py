@@ -1,7 +1,7 @@
 from eval.run_utils import run_score_eval, score_save_dir
 
 
-PRUNE_METHODS = ["wanda", "magnitude", "sparsegpt"]
+PRUNE_METHODS = ["wanda", "magnitude", "sparsegpt", "random"]
 CALIB_DATASETS = ["c4", "c4_train", "c4_test", "c4_validation", "metamathqa_math_500", "MetaMathQA-math-500", "math_500"]
 PP_EVAL_DATASETS = ["wikitext2", "c4_test", "c4_validation"]
 SCORE_ORDERS = ["global", "local", "per_op"]
@@ -70,6 +70,7 @@ def add_common_prune_args(parser, require_model=True, default_model=None, model_
     parser.add_argument("--downstream_max_examples", type=int, default=500, help="Use -1 for all downstream examples.")
     parser.add_argument("--downstream_start_index", type=int, default=0)
     parser.add_argument("--downstream_shuffle", action="store_true")
+    parser.add_argument("--downstream_batch_size", type=int, default=1)
     parser.add_argument("--downstream_max_prompt_length", type=int, default=2048)
     parser.add_argument("--downstream_max_new_tokens", type=int, default=2048)
     parser.add_argument("--downstream_temperature", type=float, default=0.0)
@@ -91,6 +92,10 @@ def add_common_prune_args(parser, require_model=True, default_model=None, model_
 
 
 def run_prune_args(args):
+    if args.prune_method == "random":
+        print("Using random pruning; no score PKLs will be loaded or saved.")
+        run_score_eval(args, None)
+        return
     if args.save_score_pkl:
         score_dir = score_save_dir(args)
         print(f"Using persistent score directory: {score_dir}")

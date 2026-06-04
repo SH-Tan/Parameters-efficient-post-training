@@ -277,7 +277,7 @@ def draw_run_comparison_plots(
     run_root,
     calib_data,
     seq_len,
-    methods=("wanda", "magnitude", "sparsegpt"),
+    methods=("wanda", "magnitude", "sparsegpt", "random"),
     max_sparsity=0.5,
     pp_seq_len=1024,
 ):
@@ -352,7 +352,7 @@ def draw_dataset_comparisons(
     dataset_runs,
     output_dir,
     seq_len,
-    methods=("wanda", "magnitude", "sparsegpt"),
+    methods=("wanda", "magnitude", "sparsegpt", "random"),
     score_orders=("global", "local", "per_op"),
     max_sparsity=0.5,
     pp_seq_len=1024,
@@ -459,16 +459,22 @@ def draw_accuracy_vs_sparsity(csv_path, plot_path):
     if not series:
         return None
 
+    merged_series = {}
+    for key, values in series.items():
+        signature = tuple(sorted(values))
+        merged_series.setdefault(signature, []).append(key)
+
     os.makedirs(os.path.dirname(plot_path), exist_ok=True)
     plt.figure(figsize=(8, 5), dpi=150)
-    for (method, score_order), values in sorted(series.items()):
-        values = sorted(values)
+    for signature, keys in sorted(merged_series.items(), key=lambda item: item[1]):
+        values = list(signature)
+        label = " / ".join(f"{method}-{score_order}" for method, score_order in keys)
         plt.plot(
             [item[0] for item in values],
             [item[1] for item in values],
             marker="o",
             linewidth=1.5,
-            label=f"{method}-{score_order}",
+            label=label,
         )
 
     plt.xlabel("Sparsity")

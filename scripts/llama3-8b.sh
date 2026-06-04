@@ -52,6 +52,7 @@ downstream_reward_score_dir="${DOWNSTREAM_REWARD_SCORE_DIR:-}"
 downstream_max_examples="${DOWNSTREAM_MAX_EXAMPLES:-500}"
 downstream_start_index="${DOWNSTREAM_START_INDEX:-0}"
 downstream_shuffle="${DOWNSTREAM_SHUFFLE:-0}"
+downstream_batch_size="${DOWNSTREAM_BATCH_SIZE:-1}"
 downstream_max_prompt_length="${DOWNSTREAM_MAX_PROMPT_LENGTH:-2048}"
 downstream_max_new_tokens="${DOWNSTREAM_MAX_NEW_TOKENS:-2048}"
 downstream_temperature="${DOWNSTREAM_TEMPERATURE:-0.0}"
@@ -70,7 +71,7 @@ fi
 
 downstream_eval_arg=""
 if [ "$run_downstream_eval" = "1" ]; then
-    downstream_eval_arg="--do_downstream_eval --downstream_task_data $downstream_task_data --downstream_prompt_key $downstream_prompt_key --downstream_max_examples $downstream_max_examples --downstream_start_index $downstream_start_index --downstream_max_prompt_length $downstream_max_prompt_length --downstream_max_new_tokens $downstream_max_new_tokens --downstream_temperature $downstream_temperature --downstream_top_p $downstream_top_p --downstream_top_k $downstream_top_k"
+    downstream_eval_arg="--do_downstream_eval --downstream_task_data $downstream_task_data --downstream_prompt_key $downstream_prompt_key --downstream_max_examples $downstream_max_examples --downstream_start_index $downstream_start_index --downstream_batch_size $downstream_batch_size --downstream_max_prompt_length $downstream_max_prompt_length --downstream_max_new_tokens $downstream_max_new_tokens --downstream_temperature $downstream_temperature --downstream_top_p $downstream_top_p --downstream_top_k $downstream_top_k"
     if [ -n "$downstream_response_key" ]; then
         downstream_eval_arg="$downstream_eval_arg --downstream_response_key $downstream_response_key"
     fi

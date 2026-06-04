@@ -16,7 +16,7 @@ log_msg() {
 
 model="${MODEL:-Qwen/Qwen2.5-0.5B}"
 cache_dir="${CACHE_DIR:-llm_weights}"
-calib_data="${CALIB_DATA:-c4}"
+calib_data="${CALIB_DATA:-metamathqa_math_500}"
 pp_eval_data="${PP_EVAL_DATA:-c4_test}"
 output_root="${OUTPUT_ROOT:-out/qwen2.5_0.5b}"
 plot_only="${PLOT_ONLY:-0}"
@@ -33,17 +33,19 @@ fi
 wanda_save_dir="${WANDA_SAVE_DIR:-$output_root/$run_name/wanda}"
 magnitude_save_dir="${MAGNITUDE_SAVE_DIR:-$output_root/$run_name/magnitude}"
 sparsegpt_save_dir="${SPARSEGPT_SAVE_DIR:-$output_root/$run_name/sparsegpt}"
+random_save_dir="${RANDOM_SAVE_DIR:-$output_root/$run_name/random}"
 
 nsamples="${NSAMPLES:-128}"
 seed="${SEED:-13}"
 seq_len="${SEQ_LEN:-1024}"
 pp_seqlen="${PP_SEQLEN:-1024}"
-sparsity_ratios="${SPARSITY_RATIOS:-0 0.1 0.2 0.3 0.4 0.5 0.7}"
+sparsity_ratios="${SPARSITY_RATIOS:-0 0.1 0.2 0.3 0.4 0.5}"
 score_orders="${SCORE_ORDERS:-global local per_op}"
 
-run_wanda="${RUN_WANDA:-1}"
-run_magnitude="${RUN_MAGNITUDE:-1}"
-run_sparsegpt="${RUN_SPARSEGPT:-1}"
+run_wanda="${RUN_WANDA:-0}"
+run_magnitude="${RUN_MAGNITUDE:-0}"
+run_sparsegpt="${RUN_SPARSEGPT:-0}"
+run_random="${RUN_RANDOM:-1}"
 run_pp_eval="${RUN_PP_EVAL:-1}"
 run_downstream_eval="${RUN_DOWNSTREAM_EVAL:-1}"
 run_plots="${RUN_PLOTS:-1}"
@@ -57,8 +59,9 @@ downstream_reward_score_dir="${DOWNSTREAM_REWARD_SCORE_DIR:-}"
 downstream_max_examples="${DOWNSTREAM_MAX_EXAMPLES:-500}"
 downstream_start_index="${DOWNSTREAM_START_INDEX:-0}"
 downstream_shuffle="${DOWNSTREAM_SHUFFLE:-0}"
-downstream_max_prompt_length="${DOWNSTREAM_MAX_PROMPT_LENGTH:-1024}"
-downstream_max_new_tokens="${DOWNSTREAM_MAX_NEW_TOKENS:-1024}"
+downstream_batch_size="${DOWNSTREAM_BATCH_SIZE:-500}"
+downstream_max_prompt_length="${DOWNSTREAM_MAX_PROMPT_LENGTH:-2048}"
+downstream_max_new_tokens="${DOWNSTREAM_MAX_NEW_TOKENS:-2048}"
 downstream_temperature="${DOWNSTREAM_TEMPERATURE:-0.0}"
 downstream_top_p="${DOWNSTREAM_TOP_P:-1.0}"
 downstream_top_k="${DOWNSTREAM_TOP_K:-0}"
@@ -75,7 +78,7 @@ fi
 
 downstream_eval_arg=""
 if [ "$run_downstream_eval" = "1" ]; then
-    downstream_eval_arg="--do_downstream_eval --downstream_task_data $downstream_task_data --downstream_prompt_key $downstream_prompt_key --downstream_max_examples $downstream_max_examples --downstream_start_index $downstream_start_index --downstream_max_prompt_length $downstream_max_prompt_length --downstream_max_new_tokens $downstream_max_new_tokens --downstream_temperature $downstream_temperature --downstream_top_p $downstream_top_p --downstream_top_k $downstream_top_k"
+    downstream_eval_arg="--do_downstream_eval --downstream_task_data $downstream_task_data --downstream_prompt_key $downstream_prompt_key --downstream_max_examples $downstream_max_examples --downstream_start_index $downstream_start_index --downstream_batch_size $downstream_batch_size --downstream_max_prompt_length $downstream_max_prompt_length --downstream_max_new_tokens $downstream_max_new_tokens --downstream_temperature $downstream_temperature --downstream_top_p $downstream_top_p --downstream_top_k $downstream_top_k"
     if [ -n "$downstream_response_key" ]; then
         downstream_eval_arg="$downstream_eval_arg --downstream_response_key $downstream_response_key"
     fi
@@ -153,6 +156,9 @@ draw_plots() {
     if [ "$run_sparsegpt" = "1" ]; then
         plot_methods="$plot_methods sparsegpt"
     fi
+    if [ "$run_random" = "1" ]; then
+        plot_methods="$plot_methods random"
+    fi
     if [ -z "$plot_methods" ]; then
         echo "No methods selected for plotting."
         exit 1
@@ -174,12 +180,13 @@ log_msg "Run output root: $output_root/$run_name"
 log_msg "Calibration data: $calib_data"
 log_msg "PPL eval data: $pp_eval_data"
 log_msg "Downstream eval enabled: $run_downstream_eval"
-log_msg "Methods: wanda=$run_wanda magnitude=$run_magnitude sparsegpt=$run_sparsegpt"
+log_msg "Methods: wanda=$run_wanda magnitude=$run_magnitude sparsegpt=$run_sparsegpt random=$run_random"
 log_msg "Sparsity ratios: $sparsity_ratios"
 log_msg "Score orders: $score_orders"
 log_msg "WANDA save dir: $wanda_save_dir"
 log_msg "Magnitude save dir: $magnitude_save_dir"
 log_msg "SparseGPT save dir: $sparsegpt_save_dir"
+log_msg "Random save dir: $random_save_dir"
 
 if [ "$plot_only" = "1" ]; then
     draw_plots
@@ -194,6 +201,10 @@ else
 
     if [ "$run_sparsegpt" = "1" ]; then
         run_method "sparsegpt" "$sparsegpt_save_dir"
+    fi
+
+    if [ "$run_random" = "1" ]; then
+        run_method "random" "$random_save_dir"
     fi
 
     if [ "$run_plots" = "1" ] && { [ "$run_pp_eval" = "1" ] || [ "$run_downstream_eval" = "1" ]; }; then

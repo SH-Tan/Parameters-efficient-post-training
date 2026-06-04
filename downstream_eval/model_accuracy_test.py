@@ -42,6 +42,7 @@ class DownstreamEvalConfig:
     device: str = "cuda:0" if torch.cuda.is_available() else "cpu"
     max_prompt_length: int = 2048
     max_new_tokens: int = 2048
+    batch_size: int = 1
     temperature: float = 0.0
     top_p: float = 1.0
     top_k: int = 0
@@ -299,14 +300,7 @@ def score_response(
     return float(score)
 
 
-def generate_response(model, tokenizer, prompt_text: str, args: argparse.Namespace, device: torch.device) -> str:
-    inputs = tokenizer(
-        prompt_text,
-        return_tensors="pt",
-        truncation=True,
-        max_length=args.max_prompt_length,
-        return_token_type_ids=False,
-    ).to(device)
+def _generation_kwargs(tokenizer, args: argparse.Namespace | DownstreamEvalConfig) -> dict[str, Any]:
     generation_kwargs = {
         "max_new_tokens": args.max_new_tokens,
         "do_sample": args.temperature > 0,
@@ -315,12 +309,46 @@ def generate_response(model, tokenizer, prompt_text: str, args: argparse.Namespa
     }
     if generation_kwargs["do_sample"]:
         generation_kwargs.update(temperature=args.temperature, top_p=args.top_p, top_k=args.top_k)
+    return generation_kwargs
 
-    generated = model.generate(**inputs, **generation_kwargs)
+
+def generate_response(model, tokenizer, prompt_text: str, args: argparse.Namespace, device: torch.device) -> str:
+    inputs = tokenizer(
+        prompt_text,
+        return_tensors="pt",
+        truncation=True,
+        max_length=args.max_prompt_length,
+        return_token_type_ids=False,
+    ).to(device)
+
+    generated = model.generate(**inputs, **_generation_kwargs(tokenizer, args))
     response_ids = generated[0, inputs["input_ids"].shape[1] :]
     response = tokenizer.decode(response_ids, skip_special_tokens=True)
     del inputs, generated, response_ids
     return response
+
+
+def generate_responses(model, tokenizer, prompt_texts: list[str], args: argparse.Namespace | DownstreamEvalConfig, device: torch.device) -> list[str]:
+    if len(prompt_texts) == 1:
+        return [generate_response(model, tokenizer, prompt_texts[0], args, device)]
+
+    inputs = tokenizer(
+        prompt_texts,
+        return_tensors="pt",
+        truncation=True,
+        max_length=args.max_prompt_length,
+        padding=True,
+        return_token_type_ids=False,
+    ).to(device)
+    prompt_width = inputs["input_ids"].shape[1]
+    generated = model.generate(**inputs, **_generation_kwargs(tokenizer, args))
+
+    responses = []
+    for row_idx in range(len(prompt_texts)):
+        response_ids = generated[row_idx, prompt_width:]
+        responses.append(tokenizer.decode(response_ids, skip_special_tokens=True))
+    del inputs, generated, response_ids
+    return responses
 
 
 def evaluate_model_task_accuracy(
@@ -347,31 +375,45 @@ def evaluate_model_task_accuracy(
         output_handle = output_path.open("w", encoding="utf-8")
 
     try:
+        batch_size = max(1, int(getattr(args, "batch_size", 1)))
         with torch.inference_mode():
-            for example_idx, example in enumerate(tqdm(examples, desc="Evaluating"), start=1):
-                response = generate_response(model, tokenizer, example.prompt_text, args, device)
-                row = None
-                if output_handle is not None:
-                    row = {"example_id": example.example_id, "prompt": example.prompt_text, "response": response}
-                if example.ground_truth is None:
-                    num_unscored += 1
-                    if row is not None:
-                        row["task_score"] = None
-                else:
-                    score = score_response(example, response, reward_score_dir=reward_score_dir)
-                    is_correct = bool(score == 1.0)
-                    scores.append(score)
-                    correct.append(is_correct)
-                    if row is not None:
-                        row["task_score"] = score
-                        row["is_correct"] = is_correct
+            with tqdm(total=len(examples), desc="Evaluating") as progress:
+                for batch_start in range(0, len(examples), batch_size):
+                    batch_examples = examples[batch_start:batch_start + batch_size]
+                    responses = generate_responses(
+                        model,
+                        tokenizer,
+                        [example.prompt_text for example in batch_examples],
+                        args,
+                        device,
+                    )
 
-                if row is not None:
-                    output_handle.write(json.dumps(row, ensure_ascii=False) + "\n")
-                    output_handle.flush()
-                del response, row
-                if example_idx % 20 == 0 and torch.cuda.is_available():
-                    torch.cuda.empty_cache()
+                    for example, response in zip(batch_examples, responses):
+                        row = None
+                        if output_handle is not None:
+                            row = {"example_id": example.example_id, "prompt": example.prompt_text, "response": response}
+                        if example.ground_truth is None:
+                            num_unscored += 1
+                            if row is not None:
+                                row["task_score"] = None
+                        else:
+                            score = score_response(example, response, reward_score_dir=reward_score_dir)
+                            is_correct = bool(score == 1.0)
+                            scores.append(score)
+                            correct.append(is_correct)
+                            if row is not None:
+                                row["task_score"] = score
+                                row["is_correct"] = is_correct
+
+                        if row is not None:
+                            output_handle.write(json.dumps(row, ensure_ascii=False) + "\n")
+                            output_handle.flush()
+                        del response, row
+
+                    progress.update(len(batch_examples))
+                    del responses, batch_examples
+                    if (batch_start + batch_size) % 20 == 0 and torch.cuda.is_available():
+                        torch.cuda.empty_cache()
     finally:
         if output_handle is not None:
             output_handle.close()
@@ -413,6 +455,7 @@ def evaluate_downstream_task_accuracy(
 ) -> dict[str, Any]:
     if tokenizer.pad_token_id is None:
         tokenizer.pad_token = tokenizer.eos_token
+    tokenizer.padding_side = "left"
 
     examples = load_examples(
         dataset_path,
@@ -449,6 +492,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--seed", type=int, default=42)
     parser.add_argument("--max_prompt_length", type=int, default=2048)
     parser.add_argument("--max_new_tokens", type=int, default=2048)
+    parser.add_argument("--batch_size", type=int, default=1)
     parser.add_argument("--temperature", type=float, default=0.0)
     parser.add_argument("--top_p", type=float, default=1.0)
     parser.add_argument("--top_k", type=int, default=0)

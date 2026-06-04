@@ -13,6 +13,7 @@ from eval.result_utils import (
 )
 from prune import check_sparsity
 from prune.prune_magnitude import compute_magnitude_scores
+from prune.prune_random import prune_random
 from prune.prune_sparsegpt import compute_sparsegpt_scores
 from prune.prune_wanda import compute_wanda_scores
 from prune.score_prune_utils import prune_by_scores
@@ -67,6 +68,7 @@ def run_downstream_eval(args, model, tokenizer, model_device, out_dir, score_ord
         "starting downstream eval "
         f"score_order={score_order} sparsity={target_sparsity:.4f} "
         f"examples={args.downstream_max_examples} "
+        f"batch_size={args.downstream_batch_size} "
         f"max_new_tokens={args.downstream_max_new_tokens} "
         f"max_prompt_length={args.downstream_max_prompt_length}"
     )
@@ -74,6 +76,7 @@ def run_downstream_eval(args, model, tokenizer, model_device, out_dir, score_ord
         device=str(model_device),
         max_prompt_length=args.downstream_max_prompt_length,
         max_new_tokens=args.downstream_max_new_tokens,
+        batch_size=args.downstream_batch_size,
         temperature=args.downstream_temperature,
         top_p=args.downstream_top_p,
         top_k=args.downstream_top_k,
@@ -123,12 +126,16 @@ def run_score_eval(args, score_dir):
     score_orders = resolve_score_orders(args)
     tokenizer = get_tokenizer(args.model, args.cache_dir)
 
-    model = get_llm(args.model, args.cache_dir, model_device, args.seqlen)
-    model.eval()
-    score_source = compute_scores(args, model, tokenizer, model_device, score_dir)
-    del model
-    if torch.cuda.is_available():
-        torch.cuda.empty_cache()
+    score_source = None
+    if args.prune_method == "random":
+        print("Skipping score computation for random pruning.")
+    else:
+        model = get_llm(args.model, args.cache_dir, model_device, args.seqlen)
+        model.eval()
+        score_source = compute_scores(args, model, tokenizer, model_device, score_dir)
+        del model
+        if torch.cuda.is_available():
+            torch.cuda.empty_cache()
 
     if args.skip_pp_eval and not args.do_downstream_eval:
         print("Skipping PP eval and downstream eval.")
@@ -191,13 +198,20 @@ def run_score_eval(args, score_dir):
             try:
                 current_model.eval()
                 if target_sparsity > 0:
+                    if args.prune_method == "random":
+                        print(
+                            f"Random pruning score_order={score_order} "
+                            f"target_sparsity={target_sparsity:.4f}"
+                        )
+                        summary = prune_random(current_model, target_sparsity, score_order, args.seed)
+                    else:
+                        print(
+                            f"Pruning with recomputed scores from {'memory' if score_dir is None else score_dir} "
+                            f"score_order={score_order} target_sparsity={target_sparsity:.4f}"
+                        )
+                        summary = prune_by_scores(current_model, score_source, target_sparsity, score_order)
                     print(
-                        f"Pruning with recomputed scores from {'memory' if score_dir is None else score_dir} "
-                        f"score_order={score_order} target_sparsity={target_sparsity:.4f}"
-                    )
-                    summary = prune_by_scores(current_model, score_source, target_sparsity, score_order)
-                    print(
-                        f"score prune summary: {summary['pruned']}/{summary['total']} "
+                        f"{args.prune_method} prune summary: {summary['pruned']}/{summary['total']} "
                         f"({summary['actual_sparsity']:.4f})"
                     )
 

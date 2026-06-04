@@ -18,8 +18,8 @@ def parse_args():
     parser.add_argument(
         "--methods",
         nargs="+",
-        default=["wanda", "magnitude", "sparsegpt"],
-        choices=["wanda", "magnitude", "sparsegpt"],
+        default=["wanda", "magnitude", "sparsegpt", "random"],
+        choices=["wanda", "magnitude", "sparsegpt", "random"],
     )
     return parser.parse_args()
 
