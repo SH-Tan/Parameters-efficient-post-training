@@ -4,8 +4,9 @@ from datasets import load_dataset
 
 
 class TokenizerWrapper:
-    def __init__(self, input_ids):
+    def __init__(self, input_ids, pad_token_id=None):
         self.input_ids = input_ids
+        self.pad_token_id = pad_token_id
 
 
 class StreamingTextEvalWrapper:
@@ -16,6 +17,7 @@ class StreamingTextEvalWrapper:
         self.text_key = text_key
         self.row_indices = None if row_indices is None else set(row_indices)
         self.max_row_index = None if self.row_indices is None else max(self.row_indices)
+        self.pad_token_id = _pad_token_id(tokenizer)
 
     def iter_input_ids(self):
         token_buffer = torch.empty(0, dtype=torch.long)
@@ -37,6 +39,35 @@ class StreamingTextEvalWrapper:
             while token_buffer.numel() >= self.seqlen:
                 yield token_buffer[: self.seqlen].unsqueeze(0)
                 token_buffer = token_buffer[self.seqlen :]
+
+        if token_buffer.numel() > 0:
+            yield _right_pad_1d(token_buffer, self.seqlen, self.pad_token_id).unsqueeze(0)
+
+
+def _pad_token_id(tokenizer):
+    if tokenizer is None:
+        return 0
+    if tokenizer.pad_token_id is not None:
+        return tokenizer.pad_token_id
+    if tokenizer.eos_token_id is not None:
+        return tokenizer.eos_token_id
+    return 0
+
+
+def _right_pad_1d(input_ids, seqlen, pad_token_id):
+    if input_ids.numel() >= seqlen:
+        return input_ids[:seqlen]
+
+    padded = torch.full((seqlen,), int(pad_token_id), dtype=torch.long)
+    padded[: input_ids.numel()] = input_ids
+    return padded
+
+
+def _calibration_pair(input_ids):
+    inp = input_ids.unsqueeze(0)
+    tar = inp.clone()
+    tar[:, :-1] = -100
+    return inp, tar
 
 
 def _sample_from_token_buffer(token_buffer, nsamples, seqlen, seed):
@@ -82,6 +113,31 @@ def _build_token_buffer_from_texts(texts, tokenizer, min_tokens):
         raise ValueError("Dataset did not contain any tokenizable text.")
 
     return torch.cat(chunks, dim=1)
+
+
+def _build_calibration_samples_from_token_ids(rows, ids_key, nsamples, seqlen, pad_token_id):
+    trainloader = []
+    for row in rows:
+        ids = row.get(ids_key)
+        if not ids:
+            continue
+
+        input_ids = torch.tensor(ids, dtype=torch.long)
+        input_ids = _right_pad_1d(input_ids, seqlen, pad_token_id)
+        trainloader.append(_calibration_pair(input_ids))
+
+        if len(trainloader) >= nsamples:
+            break
+
+    if not trainloader:
+        raise ValueError(f"Dataset did not contain any token ids in column {ids_key}.")
+    if len(trainloader) < nsamples:
+        raise ValueError(
+            f"Not enough rows with token ids in column {ids_key}. "
+            f"Need {nsamples}, found {len(trainloader)}."
+        )
+
+    return trainloader
 
 
 def _metamathqa_text(row, include_response=True):
@@ -183,6 +239,24 @@ def get_metamathqa_math_500(nsamples, seed, seqlen, tokenizer):
     return trainloader, valenc
 
 
+def get_actor_math_500_response(nsamples, seed, seqlen, tokenizer):
+    data_file = "job_05b_vh_init_e5_metamath_global_step_800/job_05b_vh_init_e5_metamath_global_step_800.parquet"
+    dataset = load_dataset(
+        "ShuoZheLi/actor_math_500_response",
+        data_files=data_file,
+        split="train",
+        streaming=True,
+    )
+    trainloader = _build_calibration_samples_from_token_ids(
+        dataset,
+        "prompt_generated_trajectory_ids",
+        nsamples,
+        seqlen,
+        _pad_token_id(tokenizer),
+    )
+    return trainloader, None
+
+
 def get_loaders(name, nsamples=128, seed=0, seqlen=2048, tokenizer=None):
     if 'wikitext2' in name:
         return get_wikitext2(nsamples, seed, seqlen, tokenizer)
@@ -192,4 +266,6 @@ def get_loaders(name, nsamples=128, seed=0, seqlen=2048, tokenizer=None):
         return get_c4(nsamples, seed, seqlen, tokenizer, split_name="test")
     if name in {"metamathqa_math_500", "MetaMathQA-math-500", "math_500"}:
         return get_metamathqa_math_500(nsamples, seed, seqlen, tokenizer)
+    if name in {"actor_math_500_response", "actor_math_500_response_ids"}:
+        return get_actor_math_500_response(nsamples, seed, seqlen, tokenizer)
     raise ValueError(f"Unsupported dataset name: {name}")

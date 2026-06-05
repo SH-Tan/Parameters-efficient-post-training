@@ -16,8 +16,8 @@ log_msg() {
 
 model="${MODEL:-Qwen/Qwen2.5-0.5B}"
 cache_dir="${CACHE_DIR:-llm_weights}"
-calib_data="${CALIB_DATA:-metamathqa_math_500}"
-pp_eval_data="${PP_EVAL_DATA:-c4_test}"
+calib_data="${CALIB_DATA:-actor_math_500_response}"
+pp_eval_data="${PP_EVAL_DATA:-wikitext2}"
 output_root="${OUTPUT_ROOT:-out/qwen2.5_0.5b}"
 plot_only="${PLOT_ONLY:-0}"
 if [ "$plot_only" = "1" ] && [ -z "${RUN_NAME:-}" ]; then
@@ -35,10 +35,10 @@ magnitude_save_dir="${MAGNITUDE_SAVE_DIR:-$output_root/$run_name/magnitude}"
 sparsegpt_save_dir="${SPARSEGPT_SAVE_DIR:-$output_root/$run_name/sparsegpt}"
 random_save_dir="${RANDOM_SAVE_DIR:-$output_root/$run_name/random}"
 
-nsamples="${NSAMPLES:-128}"
+nsamples="${NSAMPLES:-500}"
 seed="${SEED:-13}"
-seq_len="${SEQ_LEN:-1024}"
-pp_seqlen="${PP_SEQLEN:-1024}"
+seq_len="${SEQ_LEN:-2048}"
+pp_seqlen="${PP_SEQLEN:-2048}"
 sparsity_ratios="${SPARSITY_RATIOS:-0 0.1 0.2 0.3 0.4 0.5}"
 score_orders="${SCORE_ORDERS:-per_op}"
 

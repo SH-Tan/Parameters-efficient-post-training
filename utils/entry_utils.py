@@ -2,7 +2,17 @@ from eval.run_utils import run_score_eval, score_save_dir
 
 
 PRUNE_METHODS = ["wanda", "magnitude", "sparsegpt", "random"]
-CALIB_DATASETS = ["c4", "c4_train", "c4_test", "c4_validation", "metamathqa_math_500", "MetaMathQA-math-500", "math_500"]
+CALIB_DATASETS = [
+    "c4",
+    "c4_train",
+    "c4_test",
+    "c4_validation",
+    "metamathqa_math_500",
+    "MetaMathQA-math-500",
+    "math_500",
+    "actor_math_500_response",
+    "actor_math_500_response_ids",
+]
 PP_EVAL_DATASETS = ["wikitext2", "c4_test", "c4_validation"]
 SCORE_ORDERS = ["global", "local", "per_op"]
 

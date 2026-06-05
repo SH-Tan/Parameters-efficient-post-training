@@ -103,6 +103,7 @@ def main() -> None:
     tokenizer = AutoTokenizer.from_pretrained(actor_dir, trust_remote_code=args.trust_remote_code)
     if tokenizer.pad_token_id is None:
         tokenizer.pad_token = tokenizer.eos_token
+    tokenizer.padding_side = "right"
 
     device = torch.device(args.device)
     model = AutoModelForCausalLM.from_pretrained(

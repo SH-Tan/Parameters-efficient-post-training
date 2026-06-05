@@ -455,7 +455,7 @@ def evaluate_downstream_task_accuracy(
 ) -> dict[str, Any]:
     if tokenizer.pad_token_id is None:
         tokenizer.pad_token = tokenizer.eos_token
-    tokenizer.padding_side = "left"
+    tokenizer.padding_side = "right"
 
     examples = load_examples(
         dataset_path,
@@ -511,6 +511,7 @@ def main() -> None:
     tokenizer = AutoTokenizer.from_pretrained(args.model_name_or_path, trust_remote_code=args.trust_remote_code)
     if tokenizer.pad_token_id is None:
         tokenizer.pad_token = tokenizer.eos_token
+    tokenizer.padding_side = "right"
 
     device = torch.device(args.device)
     model = AutoModelForCausalLM.from_pretrained(
