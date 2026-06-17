@@ -37,6 +37,13 @@ def add_common_prune_args(parser, require_model=True, default_model=None, model_
         default=SCORE_ORDERS,
         help="Score ordering for prune eval: global all layers/ops, local per layer, or per op.",
     )
+    parser.add_argument(
+        "--prune_ops",
+        type=str,
+        nargs="+",
+        default=None,
+        help="Ops to prune. Accepts q,k,v or q k v; full names like q_proj also work.",
+    )
     parser.add_argument("--cache_dir", default="llm_weights", type=str)
     parser.add_argument("--save", type=str, default="scores", help="Directory to save outputs.")
     parser.add_argument(

@@ -1,6 +1,24 @@
 import torch
 import torch.nn as nn
 
+PRUNABLE_OP_ALIASES = {
+    "q": "self_attn.q_proj",
+    "k": "self_attn.k_proj",
+    "v": "self_attn.v_proj",
+    "o": "self_attn.o_proj",
+    "up": "mlp.up_proj",
+    "gate": "mlp.gate_proj",
+    "down": "mlp.down_proj",
+    "q_proj": "self_attn.q_proj",
+    "k_proj": "self_attn.k_proj",
+    "v_proj": "self_attn.v_proj",
+    "o_proj": "self_attn.o_proj",
+    "up_proj": "mlp.up_proj",
+    "gate_proj": "mlp.gate_proj",
+    "down_proj": "mlp.down_proj",
+}
+PRUNABLE_OPS = tuple(dict.fromkeys(PRUNABLE_OP_ALIASES.values()))
+
 
 def as_device(device):
     if isinstance(device, int):
@@ -29,7 +47,33 @@ def find_layers(module, layers=[nn.Linear], name=''):
         ))
     return res
 
-def check_sparsity(model):
+
+def normalize_prune_ops(prune_ops):
+    if prune_ops is None:
+        return None
+    normalized = []
+    for raw_op in prune_ops:
+        for op in raw_op.split(","):
+            op = op.strip()
+            if not op:
+                continue
+            if op not in PRUNABLE_OP_ALIASES:
+                choices = ", ".join(sorted(PRUNABLE_OP_ALIASES))
+                raise ValueError(f"Unsupported prune op: {op}. Choices: {choices}")
+            canonical_op = PRUNABLE_OP_ALIASES[op]
+            if canonical_op not in normalized:
+                normalized.append(canonical_op)
+    return tuple(normalized) if normalized else None
+
+
+def filter_prune_ops(subset, prune_ops):
+    if prune_ops is None:
+        return subset
+    prune_ops = set(prune_ops)
+    return {name: module for name, module in subset.items() if name in prune_ops}
+
+
+def check_sparsity(model, prune_ops=None):
     use_cache = model.config.use_cache 
     model.config.use_cache = False 
 
@@ -38,7 +82,7 @@ def check_sparsity(model):
     total_params = 0
     for i in range(len(layers)):
         layer = layers[i]
-        subset = find_layers(layer)
+        subset = filter_prune_ops(find_layers(layer), prune_ops)
 
         sub_count = 0
         sub_params = 0

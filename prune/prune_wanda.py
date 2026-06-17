@@ -1,7 +1,7 @@
 import torch
 
 from eval.data import get_loaders
-from prune import as_device, find_layers, prepare_calibration_input
+from prune import as_device, filter_prune_ops, find_layers, prepare_calibration_input
 from prune.wanda_utils import WrappedGPT, layer_forward
 from utils.score_io_utils import save_layer_scores_pkl
 
@@ -30,7 +30,7 @@ def compute_wanda_scores(args, model, tokenizer, device=torch.device("cuda:0"), 
     wanda_scores = [] if save_dir is None else None
 
     for layer_idx, layer in enumerate(layers):
-        subset = find_layers(layer)
+        subset = filter_prune_ops(find_layers(layer), args.prune_ops)
 
         if hasattr(model, "hf_device_map") and (f"model.layers.{layer_idx}" in model.hf_device_map):
             dev = as_device(model.hf_device_map[f"model.layers.{layer_idx}"])

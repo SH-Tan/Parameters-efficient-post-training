@@ -11,14 +11,14 @@ def _loader_pad_token_id(testloader):
     return getattr(testloader, "pad_token_id", None)
 
 
-def _right_pad_testenc(testenc, seqlen, pad_token_id):
+def _left_pad_testenc(testenc, seqlen, pad_token_id):
     remainder = testenc.numel() % seqlen
     if remainder == 0:
         return testenc
 
     pad_len = seqlen - remainder
     padding = torch.full((testenc.shape[0], pad_len), int(pad_token_id), dtype=testenc.dtype)
-    return torch.cat((testenc, padding), dim=1)
+    return torch.cat((padding, testenc), dim=1)
 
 
 def load_wikitext2_eval(tokenizer):
@@ -107,7 +107,7 @@ def eval_ppl_wikitext(model, testenc, bs=1, device=None):
     pad_token_id = _loader_pad_token_id(testenc)
     testenc = testenc.input_ids
     if pad_token_id is not None:
-        testenc = _right_pad_testenc(testenc, model.seqlen, pad_token_id)
+        testenc = _left_pad_testenc(testenc, model.seqlen, pad_token_id)
     nsamples = testenc.numel() // model.seqlen
 
     total_nll = 0.0

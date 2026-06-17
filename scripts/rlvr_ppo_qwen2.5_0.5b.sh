@@ -34,14 +34,15 @@ nsamples="${NSAMPLES:-500}"
 seed="${SEED:-13}"
 seq_len="${SEQ_LEN:-2048}"
 pp_seqlen="${PP_SEQLEN:-2048}"
-sparsity_ratios="${SPARSITY_RATIOS:-0 0.1 0.2 0.3 0.4 0.5}"
-score_orders="${SCORE_ORDERS:-global local per_op}"
+sparsity_ratios="${SPARSITY_RATIOS:-0 0.1 0.2 0.3 0.4 0.5 0.7}"
+score_orders="${SCORE_ORDERS:-per_op}"
+prune_ops="${PRUNE_OPS:-}"
 
 run_wanda="${RUN_WANDA:-1}"
-run_magnitude="${RUN_MAGNITUDE:-0}"
+run_magnitude="${RUN_MAGNITUDE:-1}"
 run_sparsegpt="${RUN_SPARSEGPT:-1}"
 run_random="${RUN_RANDOM:-0}"
-run_pp_eval="${RUN_PP_EVAL:-0}"
+run_pp_eval="${RUN_PP_EVAL:-1}"
 run_downstream_eval="${RUN_DOWNSTREAM_EVAL:-1}"
 run_plots="${RUN_PLOTS:-1}"
 save_score_pkl="${SAVE_SCORE_PKL:-0}"
@@ -69,6 +70,11 @@ fi
 pp_eval_arg=""
 if [ "$run_pp_eval" = "0" ]; then
     pp_eval_arg="--skip_pp_eval"
+fi
+
+prune_ops_arg=""
+if [ -n "$prune_ops" ]; then
+    prune_ops_arg="--prune_ops $prune_ops"
 fi
 
 downstream_eval_arg=""
@@ -102,7 +108,7 @@ run_method() {
         fi
     fi
 
-    echo "Running method=$method save_dir=$method_save_dir score_orders=$score_orders" | tee -a "$method_log"
+    echo "Running method=$method save_dir=$method_save_dir score_orders=$score_orders prune_ops=${prune_ops:-all}" | tee -a "$method_log"
     "$python_bin" "$main_py" \
         --model "$model" \
         --prune_method "$method" \
@@ -117,10 +123,11 @@ run_method() {
         --pp_seqlen $pp_seqlen \
         --sparsity_ratio $sparsity_ratios \
         --score_order $score_orders \
+        $prune_ops_arg \
         $score_pkl_arg \
         $pp_eval_arg \
         $downstream_eval_arg >> "$method_log" 2>&1
-    echo "Finished method=$method save_dir=$method_save_dir score_orders=$score_orders" | tee -a "$method_log"
+    echo "Finished method=$method save_dir=$method_save_dir score_orders=$score_orders prune_ops=${prune_ops:-all}" | tee -a "$method_log"
 }
 
 draw_plots() {
@@ -156,6 +163,7 @@ fi
 echo "Run output root: $output_root/$run_name"
 echo "Calibration data: $calib_data"
 echo "PPL eval data: $pp_eval_data"
+echo "Prune ops: ${prune_ops:-all}"
 echo "Downstream eval enabled: $run_downstream_eval"
 echo "WANDA save dir: $wanda_save_dir"
 echo "Magnitude save dir: $magnitude_save_dir"

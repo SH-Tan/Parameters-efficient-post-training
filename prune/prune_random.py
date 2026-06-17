@@ -1,12 +1,12 @@
 import numpy as np
 import torch
 
-from prune import find_layers
+from prune import filter_prune_ops, find_layers
 
 
-def _iter_prunable_modules(model):
+def _iter_prunable_modules(model, prune_ops=None):
     for layer_idx, layer in enumerate(model.model.layers):
-        for name, module in find_layers(layer).items():
+        for name, module in filter_prune_ops(find_layers(layer), prune_ops).items():
             yield layer_idx, name, module
 
 
@@ -59,18 +59,18 @@ def _apply_random_module_counts(modules, counts, generator):
     return pruned, total
 
 
-def _apply_global_random_pruning(model, sparsity_ratio, rng, generator):
-    modules = list(_iter_prunable_modules(model))
+def _apply_global_random_pruning(model, sparsity_ratio, rng, generator, prune_ops=None):
+    modules = list(_iter_prunable_modules(model, prune_ops))
     total = sum(module.weight.numel() for _, _, module in modules)
     counts = _module_prune_counts(modules, int(total * sparsity_ratio), rng)
     return _apply_random_module_counts(modules, counts, generator)
 
 
-def _apply_local_random_pruning(model, sparsity_ratio, rng, generator):
+def _apply_local_random_pruning(model, sparsity_ratio, rng, generator, prune_ops=None):
     pruned = 0
     total = 0
     for layer_idx, layer in enumerate(model.model.layers):
-        modules = [(layer_idx, name, module) for name, module in find_layers(layer).items()]
+        modules = [(layer_idx, name, module) for name, module in filter_prune_ops(find_layers(layer), prune_ops).items()]
         layer_total = sum(module.weight.numel() for _, _, module in modules)
         counts = _module_prune_counts(modules, int(layer_total * sparsity_ratio), rng)
         layer_pruned, _ = _apply_random_module_counts(modules, counts, generator)
@@ -79,10 +79,10 @@ def _apply_local_random_pruning(model, sparsity_ratio, rng, generator):
     return pruned, total
 
 
-def _apply_per_op_random_pruning(model, sparsity_ratio, generator):
+def _apply_per_op_random_pruning(model, sparsity_ratio, generator, prune_ops=None):
     pruned = 0
     total = 0
-    for layer_idx, name, module in _iter_prunable_modules(model):
+    for layer_idx, name, module in _iter_prunable_modules(model, prune_ops):
         numel = module.weight.numel()
         selected = _random_zero_module(module, int(numel * sparsity_ratio), generator)
         pruned += selected
@@ -91,9 +91,9 @@ def _apply_per_op_random_pruning(model, sparsity_ratio, generator):
     return pruned, total
 
 
-def prune_random(model, sparsity_ratio, score_order, seed):
+def prune_random(model, sparsity_ratio, score_order, seed, prune_ops=None):
     if sparsity_ratio <= 0:
-        total = sum(module.weight.numel() for _, _, module in _iter_prunable_modules(model))
+        total = sum(module.weight.numel() for _, _, module in _iter_prunable_modules(model, prune_ops))
         return {"pruned": 0, "total": total, "actual_sparsity": 0.0}
     if sparsity_ratio > 1:
         raise ValueError(f"sparsity_ratio must be in [0, 1], got {sparsity_ratio}")
@@ -107,11 +107,11 @@ def prune_random(model, sparsity_ratio, score_order, seed):
     rng = np.random.default_rng(int(seed))
 
     if score_order == "global":
-        pruned, total = _apply_global_random_pruning(model, sparsity_ratio, rng, generator)
+        pruned, total = _apply_global_random_pruning(model, sparsity_ratio, rng, generator, prune_ops)
     elif score_order == "local":
-        pruned, total = _apply_local_random_pruning(model, sparsity_ratio, rng, generator)
+        pruned, total = _apply_local_random_pruning(model, sparsity_ratio, rng, generator, prune_ops)
     else:
-        pruned, total = _apply_per_op_random_pruning(model, sparsity_ratio, generator)
+        pruned, total = _apply_per_op_random_pruning(model, sparsity_ratio, generator, prune_ops)
 
     return {
         "pruned": pruned,

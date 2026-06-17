@@ -41,7 +41,7 @@ class StreamingTextEvalWrapper:
                 token_buffer = token_buffer[self.seqlen :]
 
         if token_buffer.numel() > 0:
-            yield _right_pad_1d(token_buffer, self.seqlen, self.pad_token_id).unsqueeze(0)
+            yield _left_pad_1d(token_buffer, self.seqlen, self.pad_token_id).unsqueeze(0)
 
 
 def _pad_token_id(tokenizer):
@@ -54,12 +54,12 @@ def _pad_token_id(tokenizer):
     return 0
 
 
-def _right_pad_1d(input_ids, seqlen, pad_token_id):
+def _left_pad_1d(input_ids, seqlen, pad_token_id):
     if input_ids.numel() >= seqlen:
         return input_ids[:seqlen]
 
     padded = torch.full((seqlen,), int(pad_token_id), dtype=torch.long)
-    padded[: input_ids.numel()] = input_ids
+    padded[-input_ids.numel() :] = input_ids
     return padded
 
 
@@ -123,7 +123,7 @@ def _build_calibration_samples_from_token_ids(rows, ids_key, nsamples, seqlen, p
             continue
 
         input_ids = torch.tensor(ids, dtype=torch.long)
-        input_ids = _right_pad_1d(input_ids, seqlen, pad_token_id)
+        input_ids = _left_pad_1d(input_ids, seqlen, pad_token_id)
         trainloader.append(_calibration_pair(input_ids))
 
         if len(trainloader) >= nsamples:

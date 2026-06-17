@@ -1,15 +1,15 @@
 import torch
 
-from prune import find_layers
+from prune import filter_prune_ops, find_layers
 from utils.score_io_utils import save_layer_scores_pkl
 
 
-def compute_magnitude_scores(model, save_dir=None):
+def compute_magnitude_scores(model, save_dir=None, prune_ops=None):
     layers = model.model.layers
     all_scores = [] if save_dir is None else None
 
     for layer_idx, layer in enumerate(layers):
-        subset = find_layers(layer)
+        subset = filter_prune_ops(find_layers(layer), prune_ops)
         layer_scores = {}
         for name, module in subset.items():
             print(f"collecting magnitude scores layer {layer_idx} name {name}")

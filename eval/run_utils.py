@@ -11,7 +11,7 @@ from eval.result_utils import (
     draw_pp_vs_sparsity,
     result_dir,
 )
-from prune import check_sparsity
+from prune import check_sparsity, normalize_prune_ops
 from prune.prune_magnitude import compute_magnitude_scores
 from prune.prune_random import prune_random
 from prune.prune_sparsegpt import compute_sparsegpt_scores
@@ -54,7 +54,7 @@ def compute_scores(args, model, tokenizer, model_device, score_dir):
     if args.prune_method == "wanda":
         scores = compute_wanda_scores(args, model, tokenizer, model_device, save_dir=score_dir)
     elif args.prune_method == "magnitude":
-        scores = compute_magnitude_scores(model, save_dir=score_dir)
+        scores = compute_magnitude_scores(model, save_dir=score_dir, prune_ops=args.prune_ops)
     elif args.prune_method == "sparsegpt":
         scores = compute_sparsegpt_scores(args, model, tokenizer, model_device, save_dir=score_dir)
     else:
@@ -64,13 +64,18 @@ def compute_scores(args, model, tokenizer, model_device, score_dir):
 
 
 def run_downstream_eval(args, model, tokenizer, model_device, out_dir, score_order, target_sparsity, actual_sparsity):
+    response_log_path = os.path.join(
+        out_dir,
+        f"downstream_task_responses_{score_order}_sparsity_{target_sparsity:.6f}.jsonl",
+    )
     print(
         "starting downstream eval "
         f"score_order={score_order} sparsity={target_sparsity:.4f} "
         f"examples={args.downstream_max_examples} "
         f"batch_size={args.downstream_batch_size} "
         f"max_new_tokens={args.downstream_max_new_tokens} "
-        f"max_prompt_length={args.downstream_max_prompt_length}"
+        f"max_prompt_length={args.downstream_max_prompt_length} "
+        f"response_log={response_log_path}"
     )
     config = DownstreamEvalConfig(
         device=str(model_device),
@@ -92,7 +97,7 @@ def run_downstream_eval(args, model, tokenizer, model_device, out_dir, score_ord
         shuffle=args.downstream_shuffle,
         seed=args.seed,
         config=config,
-        output_path=None,
+        output_path=response_log_path,
         reward_score_dir=args.downstream_reward_score_dir,
     )
     csv_path = os.path.join(out_dir, "downstream_task_results.csv")
@@ -122,6 +127,8 @@ def run_score_eval(args, score_dir):
     model_device = resolve_model_device(args.model_device)
     print(f"Using {model_device} model device")
 
+    args.prune_ops = normalize_prune_ops(args.prune_ops)
+    print(f"Prune ops: {'all' if args.prune_ops is None else ' '.join(args.prune_ops)}")
     sparsity_ratios = resolve_sparsity_ratios(args)
     score_orders = resolve_score_orders(args)
     tokenizer = get_tokenizer(args.model, args.cache_dir)
@@ -203,19 +210,19 @@ def run_score_eval(args, score_dir):
                             f"Random pruning score_order={score_order} "
                             f"target_sparsity={target_sparsity:.4f}"
                         )
-                        summary = prune_random(current_model, target_sparsity, score_order, args.seed)
+                        summary = prune_random(current_model, target_sparsity, score_order, args.seed, args.prune_ops)
                     else:
                         print(
                             f"Pruning with recomputed scores from {'memory' if score_dir is None else score_dir} "
                             f"score_order={score_order} target_sparsity={target_sparsity:.4f}"
                         )
-                        summary = prune_by_scores(current_model, score_source, target_sparsity, score_order)
+                        summary = prune_by_scores(current_model, score_source, target_sparsity, score_order, args.prune_ops)
                     print(
                         f"{args.prune_method} prune summary: {summary['pruned']}/{summary['total']} "
                         f"({summary['actual_sparsity']:.4f})"
                     )
 
-                actual_sparsity = check_sparsity(current_model)
+                actual_sparsity = check_sparsity(current_model, args.prune_ops)
                 ppl_by_seq = []
                 if not args.skip_pp_eval:
                     for seq_len in eval_seq_lens:
