@@ -1,4 +1,5 @@
 import gc
+import sys
 
 import torch
 import torch.nn as nn
@@ -21,10 +22,20 @@ def _left_pad_testenc(testenc, seqlen, pad_token_id):
     return torch.cat((padding, testenc), dim=1)
 
 
+def _tokenize_long_text(tokenizer, text):
+    original_model_max_length = getattr(tokenizer, "model_max_length", None)
+    try:
+        tokenizer.model_max_length = sys.maxsize
+        return tokenizer(text, return_tensors="pt").input_ids
+    finally:
+        if original_model_max_length is not None:
+            tokenizer.model_max_length = original_model_max_length
+
+
 def load_wikitext2_eval(tokenizer):
     testdata = load_dataset("wikitext", "wikitext-2-raw-v1", split="test")
     return TokenizerWrapper(
-        tokenizer("\n\n".join(testdata["text"]), return_tensors="pt").input_ids,
+        _tokenize_long_text(tokenizer, "\n\n".join(testdata["text"])),
         pad_token_id=_pad_token_id(tokenizer),
     )
 
@@ -39,7 +50,7 @@ def load_ppl_eval_data(name, tokenizer, nsamples, seed, seqlen):
         eval_dataset = load_dataset("ShuoZheLi/MetaMathQA-math-500", split="test")
         eval_text = "\n\n".join(_metamathqa_text(row, include_response=False) for row in eval_dataset)
         return TokenizerWrapper(
-            tokenizer(eval_text, return_tensors="pt").input_ids,
+            _tokenize_long_text(tokenizer, eval_text),
             pad_token_id=_pad_token_id(tokenizer),
         )
 

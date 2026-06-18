@@ -1,3 +1,4 @@
+import gc
 import os
 
 import torch
@@ -23,7 +24,6 @@ from utils.model_utils import get_llm, get_tokenizer, resolve_model_device
 def score_save_dir(args):
     path = os.path.join(
         args.save,
-        args.prune_method,
         args.calib_data,
         f"seq_len_{args.seqlen}",
     )
@@ -75,6 +75,7 @@ def run_downstream_eval(args, model, tokenizer, model_device, out_dir, score_ord
         f"batch_size={args.downstream_batch_size} "
         f"max_new_tokens={args.downstream_max_new_tokens} "
         f"max_prompt_length={args.downstream_max_prompt_length} "
+        f"response_log_max={args.downstream_response_log_max} "
         f"response_log={response_log_path}"
     )
     config = DownstreamEvalConfig(
@@ -85,6 +86,7 @@ def run_downstream_eval(args, model, tokenizer, model_device, out_dir, score_ord
         temperature=args.downstream_temperature,
         top_p=args.downstream_top_p,
         top_k=args.downstream_top_k,
+        response_log_max=args.downstream_response_log_max,
     )
     metrics = evaluate_downstream_task_accuracy(
         model,
@@ -138,11 +140,14 @@ def run_score_eval(args, score_dir):
         print("Skipping score computation for random pruning.")
     else:
         model = get_llm(args.model, args.cache_dir, model_device, args.seqlen)
-        model.eval()
-        score_source = compute_scores(args, model, tokenizer, model_device, score_dir)
-        del model
-        if torch.cuda.is_available():
-            torch.cuda.empty_cache()
+        try:
+            model.eval()
+            score_source = compute_scores(args, model, tokenizer, model_device, score_dir)
+        finally:
+            del model
+            gc.collect()
+            if torch.cuda.is_available():
+                torch.cuda.empty_cache()
 
     if args.skip_pp_eval and not args.do_downstream_eval:
         print("Skipping PP eval and downstream eval.")
@@ -263,6 +268,7 @@ def run_score_eval(args, score_dir):
                     dense_eval_cache = (actual_sparsity, ppl_by_seq)
             finally:
                 del current_model
+                gc.collect()
                 if torch.cuda.is_available():
                     torch.cuda.empty_cache()
 

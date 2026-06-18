@@ -257,6 +257,23 @@ def get_actor_math_500_response(nsamples, seed, seqlen, tokenizer):
     return trainloader, None
 
 
+def get_deepseek_1d5_8192_response(nsamples, seed, seqlen, tokenizer):
+    dataset = load_dataset(
+        "parquet",
+        data_files="dataset/deepseek1.5b/dsk_1d5_8192.parquet",
+        split="train",
+        streaming=True,
+    )
+    trainloader = _build_calibration_samples_from_token_ids(
+        dataset,
+        "prompt_generated_trajectory_ids",
+        nsamples,
+        seqlen,
+        _pad_token_id(tokenizer),
+    )
+    return trainloader, None
+
+
 def get_loaders(name, nsamples=128, seed=0, seqlen=2048, tokenizer=None):
     if 'wikitext2' in name:
         return get_wikitext2(nsamples, seed, seqlen, tokenizer)
@@ -268,4 +285,6 @@ def get_loaders(name, nsamples=128, seed=0, seqlen=2048, tokenizer=None):
         return get_metamathqa_math_500(nsamples, seed, seqlen, tokenizer)
     if name in {"actor_math_500_response", "actor_math_500_response_ids"}:
         return get_actor_math_500_response(nsamples, seed, seqlen, tokenizer)
+    if name in {"deepseek_1d5_8192_response", "deepseek_1.5b_8192_response"}:
+        return get_deepseek_1d5_8192_response(nsamples, seed, seqlen, tokenizer)
     raise ValueError(f"Unsupported dataset name: {name}")

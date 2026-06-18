@@ -12,6 +12,8 @@ CALIB_DATASETS = [
     "math_500",
     "actor_math_500_response",
     "actor_math_500_response_ids",
+    "deepseek_1d5_8192_response",
+    "deepseek_1.5b_8192_response",
 ]
 PP_EVAL_DATASETS = ["wikitext2", "c4_test", "c4_validation"]
 SCORE_ORDERS = ["global", "local", "per_op"]
@@ -46,6 +48,7 @@ def add_common_prune_args(parser, require_model=True, default_model=None, model_
     )
     parser.add_argument("--cache_dir", default="llm_weights", type=str)
     parser.add_argument("--save", type=str, default="scores", help="Directory to save outputs.")
+    parser.add_argument("--calib_forward_batch_size", type=int, default=1, help="WANDA/SparseGPT calibration forward microbatch size.")
     parser.add_argument(
         "--model_device",
         type=str,
@@ -93,6 +96,7 @@ def add_common_prune_args(parser, require_model=True, default_model=None, model_
     parser.add_argument("--downstream_temperature", type=float, default=0.0)
     parser.add_argument("--downstream_top_p", type=float, default=1.0)
     parser.add_argument("--downstream_top_k", type=int, default=0)
+    parser.add_argument("--downstream_response_log_max", type=int, default=-1, help="Maximum downstream responses to write; -1 writes all.")
     parser.add_argument(
         "--save_score_pkl",
         dest="save_score_pkl",

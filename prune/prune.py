@@ -88,11 +88,13 @@ def check_sparsity(model, prune_ops=None):
         sub_params = 0
         for name in subset:
             W = subset[name].weight.data
-            count += (W==0).sum().item()
-            total_params += W.numel()
+            zero_count = int((W == 0).sum().item())
+            param_count = W.numel()
+            count += zero_count
+            total_params += param_count
 
-            sub_count += (W==0).sum().item()
-            sub_params += W.numel()
+            sub_count += zero_count
+            sub_params += param_count
 
         print(f"layer {i} sparsity {float(sub_count)/sub_params:.6f}")
 
@@ -114,12 +116,14 @@ def prepare_calibration_input(model, dataloader, device, nsamples):
         dev = model.hf_device_map["model.embed_tokens"]
         device = torch.device(f"cuda:{dev}") if isinstance(dev, int) else dev
 
-    # ===== allocate =====
+    # Keep calibration activations on CPU. WANDA/SparseGPT move one sample at a
+    # time to the active layer device to avoid holding model + full activation
+    # buffers on GPU.
     dtype = next(iter(model.parameters())).dtype
     inps = torch.zeros(
         (nsamples, model.seqlen, model.config.hidden_size),
         dtype=dtype,
-        device=device
+        device="cpu"
     )
 
     cache = {
@@ -157,15 +161,17 @@ def prepare_calibration_input(model, dataloader, device, nsamples):
             elif inp.dim() != 2:
                 raise ValueError(f"Unexpected calibration input shape {tuple(inp.shape)}")
 
-            inps[i].copy_(inp)   # faster + safer than assignment
+            inps[i].copy_(inp.detach().cpu())
             cache["i"] += 1
 
             # only save once (they're usually same shape)
             if cache["attention_mask"] is None:
-                cache["attention_mask"] = kwargs.get("attention_mask", None)
+                attention_mask = kwargs.get("attention_mask", None)
+                cache["attention_mask"] = None if attention_mask is None else attention_mask.detach().cpu()
 
             if cache["position_ids"] is None:
-                cache["position_ids"] = kwargs.get("position_ids", None)
+                position_ids = kwargs.get("position_ids", None)
+                cache["position_ids"] = None if position_ids is None else position_ids.detach().cpu()
 
             raise CatchInput
 

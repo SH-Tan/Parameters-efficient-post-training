@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import argparse
+import copy
 import importlib.util
 import json
 import os
@@ -46,6 +47,7 @@ class DownstreamEvalConfig:
     temperature: float = 0.0
     top_p: float = 1.0
     top_k: int = 0
+    response_log_max: int = -1
 
 
 def resolve_dtype(name: str) -> torch.dtype:
@@ -300,15 +302,25 @@ def score_response(
     return float(score)
 
 
-def _generation_kwargs(tokenizer, args: argparse.Namespace | DownstreamEvalConfig) -> dict[str, Any]:
+def _generation_kwargs(model, tokenizer, args: argparse.Namespace | DownstreamEvalConfig) -> dict[str, Any]:
+    do_sample = args.temperature > 0
+    generation_config = copy.deepcopy(model.generation_config)
+    generation_config.do_sample = do_sample
+    if do_sample:
+        generation_config.temperature = args.temperature
+        generation_config.top_p = args.top_p
+        generation_config.top_k = args.top_k
+    else:
+        generation_config.temperature = None
+        generation_config.top_p = None
+        generation_config.top_k = None
+
     generation_kwargs = {
         "max_new_tokens": args.max_new_tokens,
-        "do_sample": args.temperature > 0,
+        "generation_config": generation_config,
         "pad_token_id": tokenizer.pad_token_id,
         "eos_token_id": tokenizer.eos_token_id,
     }
-    if generation_kwargs["do_sample"]:
-        generation_kwargs.update(temperature=args.temperature, top_p=args.top_p, top_k=args.top_k)
     return generation_kwargs
 
 
@@ -321,7 +333,7 @@ def generate_response(model, tokenizer, prompt_text: str, args: argparse.Namespa
         return_token_type_ids=False,
     ).to(device)
 
-    generated = model.generate(**inputs, **_generation_kwargs(tokenizer, args))
+    generated = model.generate(**inputs, **_generation_kwargs(model, tokenizer, args))
     response_ids = generated[0, inputs["input_ids"].shape[1] :]
     response = tokenizer.decode(response_ids, skip_special_tokens=True)
     del inputs, generated, response_ids
@@ -341,7 +353,7 @@ def generate_responses(model, tokenizer, prompt_texts: list[str], args: argparse
         return_token_type_ids=False,
     ).to(device)
     prompt_width = inputs["input_ids"].shape[1]
-    generated = model.generate(**inputs, **_generation_kwargs(tokenizer, args))
+    generated = model.generate(**inputs, **_generation_kwargs(model, tokenizer, args))
 
     responses = []
     for row_idx in range(len(prompt_texts)):
@@ -368,6 +380,8 @@ def evaluate_model_task_accuracy(
     correct: list[bool] = []
     num_unscored = 0
     output_handle = None
+    response_log_max = int(getattr(args, "response_log_max", -1))
+    logged_responses = 0
 
     if output_path is not None:
         output_path = Path(output_path).expanduser()
@@ -390,7 +404,11 @@ def evaluate_model_task_accuracy(
 
                     for example, response in zip(batch_examples, responses):
                         row = None
-                        if output_handle is not None:
+                        should_log_response = (
+                            output_handle is not None
+                            and (response_log_max < 0 or logged_responses < response_log_max)
+                        )
+                        if should_log_response:
                             row = {"example_id": example.example_id, "prompt": example.prompt_text, "response": response}
                         if example.ground_truth is None:
                             num_unscored += 1
@@ -408,6 +426,7 @@ def evaluate_model_task_accuracy(
                         if row is not None:
                             output_handle.write(json.dumps(row, ensure_ascii=False) + "\n")
                             output_handle.flush()
+                            logged_responses += 1
                         del response, row
 
                     progress.update(len(batch_examples))
@@ -496,6 +515,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--temperature", type=float, default=0.0)
     parser.add_argument("--top_p", type=float, default=1.0)
     parser.add_argument("--top_k", type=int, default=0)
+    parser.add_argument("--response_log_max", type=int, default=-1, help="Maximum responses to write; -1 writes all.")
     parser.add_argument("--dtype", choices=("bf16", "fp16", "fp32"), default="bf16")
     parser.add_argument("--device", default="cuda:0" if torch.cuda.is_available() else "cpu")
     parser.add_argument("--trust_remote_code", action="store_true")
