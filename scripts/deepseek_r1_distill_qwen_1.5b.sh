@@ -5,13 +5,14 @@ python_bin="${PYTHON_BIN:-python}"
 if [ "$python_bin" = "python" ] && [ -x "/home/tans5/anaconda3/envs/prune_llm/bin/python" ]; then
     python_bin="/home/tans5/anaconda3/envs/prune_llm/bin/python"
 fi
-main_py="${MAIN_PY:-main_rlvr.py}"
+main_py="${MAIN_PY:-main.py}"
 export MPLCONFIGDIR="${MPLCONFIGDIR:-/tmp/matplotlib-$USER}"
+export PYTORCH_CUDA_ALLOC_CONF="${PYTORCH_CUDA_ALLOC_CONF:-expandable_segments:True}"
 mkdir -p "$MPLCONFIGDIR"
 
 model="${MODEL:-deepseek-ai/DeepSeek-R1-Distill-Qwen-1.5B}"
 cache_dir="${CACHE_DIR:-llm_weights}"
-calib_data="${CALIB_DATA:-deepseek_1d5_8192_response}"
+calib_data="${CALIB_DATA:-c4}"
 pp_eval_data="${PP_EVAL_DATA:-wikitext2}"
 output_root="${OUTPUT_ROOT:-out/deepseek_r1_distill_qwen_1.5b}"
 plot_only="${PLOT_ONLY:-0}"
@@ -37,14 +38,17 @@ pp_seqlen="${PP_SEQLEN:-8192}"
 sparsity_ratios="${SPARSITY_RATIOS:-0 0.1 0.2 0.3 0.4 0.5}"
 score_orders="${SCORE_ORDERS:-per_op local global}"
 prune_ops="${PRUNE_OPS:-}"
-calib_forward_batch_size="${CALIB_FORWARD_BATCH_SIZE:-32}"
+calib_forward_batch_size="${CALIB_FORWARD_BATCH_SIZE:-128}"
+wanda_calib_forward_batch_size="${WANDA_CALIB_FORWARD_BATCH_SIZE:-128}"
+sparsegpt_calib_forward_batch_size="${SPARSEGPT_CALIB_FORWARD_BATCH_SIZE:-128}"
+sparsegpt_hessian_chunk_size="${SPARSEGPT_HESSIAN_CHUNK_SIZE:-2048}"
 
 run_magnitude="${RUN_MAGNITUDE:-1}"
 run_sparsegpt="${RUN_SPARSEGPT:-0}"
-run_wanda="${RUN_WANDA:-1}"
+run_wanda="${RUN_WANDA:-0}"
 run_random="${RUN_RANDOM:-0}"
 run_pp_eval="${RUN_PP_EVAL:-0}"
-run_downstream_eval="${RUN_DOWNSTREAM_EVAL:-0}"
+run_downstream_eval="${RUN_DOWNSTREAM_EVAL:-1}"
 run_plots="${RUN_PLOTS:-1}"
 save_score_pkl="${SAVE_SCORE_PKL:-0}"
 clear_results="${CLEAR_RESULTS:-1}"
@@ -57,7 +61,7 @@ downstream_max_examples="${DOWNSTREAM_MAX_EXAMPLES:-500}"
 downstream_start_index="${DOWNSTREAM_START_INDEX:-0}"
 downstream_shuffle="${DOWNSTREAM_SHUFFLE:-0}"
 downstream_batch_size="${DOWNSTREAM_BATCH_SIZE:-64}"
-downstream_max_prompt_length="${DOWNSTREAM_MAX_PROMPT_LENGTH:-8192}"
+downstream_max_prompt_length="${DOWNSTREAM_MAX_PROMPT_LENGTH:-2048}"
 downstream_max_new_tokens="${DOWNSTREAM_MAX_NEW_TOKENS:-8192}"
 downstream_temperature="${DOWNSTREAM_TEMPERATURE:-0.0}"
 downstream_top_p="${DOWNSTREAM_TOP_P:-1.0}"
@@ -99,6 +103,12 @@ run_method() {
     method_save_dir=$2
     method_result_dir="$method_save_dir/results/$calib_data/seq_len_$seq_len"
     method_log="$method_save_dir/run.log"
+    method_calib_forward_batch_size="$calib_forward_batch_size"
+    if [ "$method" = "wanda" ]; then
+        method_calib_forward_batch_size="$wanda_calib_forward_batch_size"
+    elif [ "$method" = "sparsegpt" ]; then
+        method_calib_forward_batch_size="$sparsegpt_calib_forward_batch_size"
+    fi
 
     mkdir -p "$method_save_dir" "$method_result_dir"
     if [ "$clear_results" = "1" ]; then
@@ -122,7 +132,8 @@ run_method() {
         --nsamples "$nsamples" \
         --seed "$seed" \
         --model_device "$model_device" \
-        --calib_forward_batch_size "$calib_forward_batch_size" \
+        --calib_forward_batch_size "$method_calib_forward_batch_size" \
+        --sparsegpt_hessian_chunk_size "$sparsegpt_hessian_chunk_size" \
         --seqlen "$seq_len" \
         --pp_seqlen $pp_seqlen \
         --sparsity_ratio $sparsity_ratios \

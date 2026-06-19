@@ -40,7 +40,13 @@ def compute_sparsegpt_scores(args, model, tokenizer, device=torch.device("cuda:0
             if hasattr(model, "hf_device_map") and (f"model.layers.{layer_idx}" in model.hf_device_map):
                 dev = as_device(model.hf_device_map[f"model.layers.{layer_idx}"])
 
-            sparsegpt_layers = {name: SparseGPT(module) for name, module in subset.items()}
+            sparsegpt_layers = {
+                name: SparseGPT(
+                    module,
+                    hessian_chunk_size=getattr(args, "sparsegpt_hessian_chunk_size", 8192),
+                )
+                for name, module in subset.items()
+            }
 
             def add_batch(name):
                 def hook(_, inp, out):

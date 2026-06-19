@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import argparse
-import copy
 import importlib.util
 import json
 import os
@@ -28,6 +27,7 @@ METAMATHQA_MATH_500_ALIASES = {
     "math_500",
 }
 MATH_DATA_SOURCES = {"lighteval/MATH", "DigitalLearningGmbH/MATH-lighteval", "HuggingFaceH4/MATH-500", "math_500"}
+METAMATHQA_MATH_500_TEST_FILE = "test.parquet"
 
 
 @dataclass(frozen=True)
@@ -118,11 +118,31 @@ def _resolve_dataset_name(path: str | Path) -> str:
     return path
 
 
+def _cached_metamathqa_math_500_test_path() -> Path | None:
+    cache_root = Path.home() / ".cache" / "huggingface" / "hub" / "datasets--ShuoZheLi--MetaMathQA-math-500"
+    ref_path = cache_root / "refs" / "main"
+    if not ref_path.is_file():
+        return None
+    test_path = cache_root / "snapshots" / ref_path.read_text(encoding="utf-8").strip() / METAMATHQA_MATH_500_TEST_FILE
+    return test_path if test_path.is_file() else None
+
+
 def _load_dataframe(path: str | Path) -> pd.DataFrame:
     path_str = str(path)
     local_path = Path(path_str).expanduser()
     if local_path.is_file() or path_str.endswith(".parquet"):
         return pd.read_parquet(local_path)
+
+    if path_str in METAMATHQA_MATH_500_ALIASES:
+        cached_test_path = _cached_metamathqa_math_500_test_path()
+        if cached_test_path is not None:
+            return pd.read_parquet(cached_test_path)
+        dataset = load_dataset(
+            _resolve_dataset_name(path_str),
+            data_files={"test": METAMATHQA_MATH_500_TEST_FILE},
+            split="test",
+        )
+        return dataset.to_pandas()
 
     dataset = load_dataset(_resolve_dataset_name(path_str), split="test")
     return dataset.to_pandas()
@@ -304,23 +324,17 @@ def score_response(
 
 def _generation_kwargs(model, tokenizer, args: argparse.Namespace | DownstreamEvalConfig) -> dict[str, Any]:
     do_sample = args.temperature > 0
-    generation_config = copy.deepcopy(model.generation_config)
-    generation_config.do_sample = do_sample
-    if do_sample:
-        generation_config.temperature = args.temperature
-        generation_config.top_p = args.top_p
-        generation_config.top_k = args.top_k
-    else:
-        generation_config.temperature = None
-        generation_config.top_p = None
-        generation_config.top_k = None
 
     generation_kwargs = {
         "max_new_tokens": args.max_new_tokens,
-        "generation_config": generation_config,
+        "do_sample": do_sample,
         "pad_token_id": tokenizer.pad_token_id,
         "eos_token_id": tokenizer.eos_token_id,
     }
+    if do_sample:
+        generation_kwargs["temperature"] = args.temperature
+        generation_kwargs["top_p"] = args.top_p
+        generation_kwargs["top_k"] = args.top_k
     return generation_kwargs
 
 
@@ -462,6 +476,7 @@ def evaluate_downstream_task_accuracy(
     tokenizer,
     dataset_path: str | Path = DEFAULT_DATASET,
     *,
+    examples: list[ExampleRecord] | None = None,
     prompt_key: str = "prompt",
     response_key: str | None = None,
     start_index: int = 0,
@@ -476,16 +491,17 @@ def evaluate_downstream_task_accuracy(
         tokenizer.pad_token = tokenizer.eos_token
     tokenizer.padding_side = "left"
 
-    examples = load_examples(
-        dataset_path,
-        tokenizer,
-        prompt_key=prompt_key,
-        response_key=response_key,
-        start_index=start_index,
-        max_examples=max_examples,
-        shuffle=shuffle,
-        seed=seed,
-    )
+    if examples is None:
+        examples = load_examples(
+            dataset_path,
+            tokenizer,
+            prompt_key=prompt_key,
+            response_key=response_key,
+            start_index=start_index,
+            max_examples=max_examples,
+            shuffle=shuffle,
+            seed=seed,
+        )
     eval_config = config or DownstreamEvalConfig(device=str(_model_device(model)))
     return evaluate_model_task_accuracy(
         model,

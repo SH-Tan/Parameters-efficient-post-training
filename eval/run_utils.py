@@ -3,7 +3,7 @@ import os
 
 import torch
 
-from downstream_eval.model_accuracy_test import DownstreamEvalConfig, evaluate_downstream_task_accuracy
+from downstream_eval.model_accuracy_test import DownstreamEvalConfig, evaluate_downstream_task_accuracy, load_examples
 from eval.eval import eval_ppl_with_loader, load_ppl_eval_data
 from eval.result_utils import (
     append_downstream_result_csv,
@@ -63,7 +63,7 @@ def compute_scores(args, model, tokenizer, model_device, score_dir):
     return score_dir if score_dir is not None else scores
 
 
-def run_downstream_eval(args, model, tokenizer, model_device, out_dir, score_order, target_sparsity, actual_sparsity):
+def run_downstream_eval(args, model, tokenizer, model_device, out_dir, score_order, target_sparsity, actual_sparsity, examples):
     response_log_path = os.path.join(
         out_dir,
         f"downstream_task_responses_{score_order}_sparsity_{target_sparsity:.6f}.jsonl",
@@ -92,6 +92,7 @@ def run_downstream_eval(args, model, tokenizer, model_device, out_dir, score_ord
         model,
         tokenizer,
         args.downstream_task_data,
+        examples=examples,
         prompt_key=args.downstream_prompt_key,
         response_key=args.downstream_response_key,
         start_index=args.downstream_start_index,
@@ -164,6 +165,7 @@ def run_score_eval(args, score_dir):
     downstream_csv_path = os.path.join(out_dir, "downstream_task_results.csv")
     accuracy_plot_path = os.path.join(out_dir, "accuracy_vs_sparsity.png")
     eval_loader = None
+    downstream_examples = None
 
     if args.skip_pp_eval:
         print("Skipping PP eval.")
@@ -175,6 +177,22 @@ def run_score_eval(args, score_dir):
             nsamples=args.nsamples,
             seed=args.seed,
             seqlen=args.seqlen,
+        )
+
+    if args.do_downstream_eval:
+        if tokenizer.pad_token_id is None:
+            tokenizer.pad_token = tokenizer.eos_token
+        tokenizer.padding_side = "left"
+        print(f"loading {args.downstream_task_data} downstream eval data")
+        downstream_examples = load_examples(
+            args.downstream_task_data,
+            tokenizer,
+            prompt_key=args.downstream_prompt_key,
+            response_key=args.downstream_response_key,
+            start_index=args.downstream_start_index,
+            max_examples=args.downstream_max_examples,
+            shuffle=args.downstream_shuffle,
+            seed=args.seed,
         )
 
     dense_eval_cache = None
@@ -262,6 +280,7 @@ def run_score_eval(args, score_dir):
                         score_order,
                         target_sparsity,
                         actual_sparsity,
+                        downstream_examples,
                     )
 
                 if target_sparsity == 0 and not args.skip_pp_eval:
@@ -282,6 +301,8 @@ def run_score_eval(args, score_dir):
             print(f"Saved accuracy vs sparsity plot: {drawn_path}")
     if eval_loader is not None:
         del eval_loader
+    if downstream_examples is not None:
+        del downstream_examples
     del score_source
     del tokenizer
     if torch.cuda.is_available():

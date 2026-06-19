@@ -6,7 +6,7 @@ from transformers.pytorch_utils import Conv1D
 
 
 class SparseGPT:
-    def __init__(self, layer):
+    def __init__(self, layer, hessian_chunk_size=8192):
         self.layer = layer
         self.dev = self.layer.weight.device
         weight = self._weight_2d()
@@ -14,6 +14,7 @@ class SparseGPT:
         self.columns = weight.shape[1]
         self.H = torch.zeros((self.columns, self.columns), device=self.dev)
         self.nsamples = 0
+        self.hessian_chunk_size = int(hessian_chunk_size)
 
     def _weight_2d(self):
         weight = self.layer.weight.data
@@ -33,8 +34,16 @@ class SparseGPT:
             inp = inp.t()
         self.H *= self.nsamples / (self.nsamples + batch_size)
         self.nsamples += batch_size
-        inp = math.sqrt(2 / self.nsamples) * inp.float()
-        self.H += inp.matmul(inp.t())
+        scale = math.sqrt(2 / self.nsamples)
+        chunk_size = self.hessian_chunk_size
+        if chunk_size <= 0:
+            inp = scale * inp.float()
+            self.H += inp.matmul(inp.t())
+            return
+        for start in range(0, inp.shape[1], chunk_size):
+            inp_chunk = scale * inp[:, start:start + chunk_size].float()
+            self.H += inp_chunk.matmul(inp_chunk.t())
+            del inp_chunk
 
     def score(self, percdamp=0.01):
         weight = self._weight_2d().clone().float()
