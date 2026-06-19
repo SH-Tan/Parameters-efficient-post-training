@@ -44,7 +44,7 @@ class DownstreamEvalConfig:
     max_prompt_length: int = 2048
     max_new_tokens: int = 2048
     batch_size: int = 1
-    generation_max_batch_tokens: int = 8192
+    generation_max_batch_tokens: int = 32768
     use_cache: bool = False
     temperature: float = 0.0
     top_p: float = 1.0
@@ -387,14 +387,41 @@ def generate_responses(model, tokenizer, prompt_texts: list[str], args: argparse
     return responses
 
 
-def _effective_generation_batch_size(args: argparse.Namespace | DownstreamEvalConfig) -> int:
+def _prompt_token_count(tokenizer, prompt_text: str, max_prompt_length: int) -> int:
+    input_ids = tokenizer(
+        prompt_text,
+        truncation=True,
+        max_length=max_prompt_length,
+        return_attention_mask=False,
+        return_token_type_ids=False,
+    )["input_ids"]
+    return len(input_ids)
+
+
+def _generation_microbatches(examples: list[ExampleRecord], tokenizer, args: argparse.Namespace | DownstreamEvalConfig):
     batch_size = max(1, int(getattr(args, "batch_size", 1)))
     max_batch_tokens = int(getattr(args, "generation_max_batch_tokens", 0))
     if max_batch_tokens <= 0:
-        return batch_size
+        for start in range(0, len(examples), batch_size):
+            yield examples[start:start + batch_size]
+        return
 
-    tokens_per_example = max(1, int(args.max_prompt_length) + int(args.max_new_tokens))
-    return max(1, min(batch_size, max_batch_tokens // tokens_per_example))
+    batch = []
+    batch_tokens = 0
+    max_prompt_length = int(args.max_prompt_length)
+    max_new_tokens = int(args.max_new_tokens)
+    for example in examples:
+        prompt_tokens = _prompt_token_count(tokenizer, example.prompt_text, max_prompt_length)
+        example_tokens = max(1, prompt_tokens + max_new_tokens)
+        if batch and (len(batch) >= batch_size or batch_tokens + example_tokens > max_batch_tokens):
+            yield batch
+            batch = []
+            batch_tokens = 0
+        batch.append(example)
+        batch_tokens += example_tokens
+
+    if batch:
+        yield batch
 
 
 def evaluate_model_task_accuracy(
@@ -424,16 +451,15 @@ def evaluate_model_task_accuracy(
 
     try:
         requested_batch_size = max(1, int(getattr(args, "batch_size", 1)))
-        batch_size = _effective_generation_batch_size(args)
-        if batch_size < requested_batch_size:
+        max_batch_tokens = int(getattr(args, "generation_max_batch_tokens", 0))
+        if max_batch_tokens > 0:
             print(
-                f"using downstream generation microbatch={batch_size} "
-                f"(requested={requested_batch_size}, max_batch_tokens={getattr(args, 'generation_max_batch_tokens', 0)})"
+                f"using downstream dynamic microbatches "
+                f"(requested_batch={requested_batch_size}, max_batch_tokens={max_batch_tokens})"
             )
         with torch.inference_mode():
             with tqdm(total=len(examples), desc="Evaluating") as progress:
-                for batch_start in range(0, len(examples), batch_size):
-                    batch_examples = examples[batch_start:batch_start + batch_size]
+                for batch_examples in _generation_microbatches(examples, tokenizer, args):
                     responses = generate_responses(
                         model,
                         tokenizer,
@@ -471,7 +497,7 @@ def evaluate_model_task_accuracy(
 
                     progress.update(len(batch_examples))
                     del responses, batch_examples
-                    if (batch_start + batch_size) % 20 == 0 and torch.cuda.is_available():
+                    if torch.cuda.is_available():
                         torch.cuda.empty_cache()
     finally:
         if output_handle is not None:
@@ -554,7 +580,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--max_prompt_length", type=int, default=2048)
     parser.add_argument("--max_new_tokens", type=int, default=2048)
     parser.add_argument("--batch_size", type=int, default=1)
-    parser.add_argument("--generation_max_batch_tokens", type=int, default=8192, help="Cap prompt+generation tokens per generation microbatch. Use <=0 to disable.")
+    parser.add_argument("--generation_max_batch_tokens", type=int, default=32768, help="Cap prompt+generation tokens per generation microbatch. Use <=0 to disable.")
     parser.add_argument("--use_cache", action="store_true", help="Use generation KV cache. Faster but uses more GPU memory.")
     parser.add_argument("--temperature", type=float, default=0.0)
     parser.add_argument("--top_p", type=float, default=1.0)
