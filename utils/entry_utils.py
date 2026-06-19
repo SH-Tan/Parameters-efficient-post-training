@@ -92,6 +92,8 @@ def add_common_prune_args(parser, require_model=True, default_model=None, model_
     parser.add_argument("--downstream_start_index", type=int, default=0)
     parser.add_argument("--downstream_shuffle", action="store_true")
     parser.add_argument("--downstream_batch_size", type=int, default=1)
+    parser.add_argument("--downstream_generation_max_batch_tokens", type=int, default=8192, help="Cap prompt+generation tokens per downstream generation microbatch. Use <=0 to disable.")
+    parser.add_argument("--downstream_use_cache", action="store_true", help="Use generation KV cache for downstream eval. Faster but uses more GPU memory.")
     parser.add_argument("--downstream_max_prompt_length", type=int, default=2048)
     parser.add_argument("--downstream_max_new_tokens", type=int, default=2048)
     parser.add_argument("--downstream_temperature", type=float, default=0.0)

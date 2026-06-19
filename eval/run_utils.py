@@ -41,7 +41,7 @@ def resolve_sparsity_ratios(args):
         if ratio not in seen:
             ratios.append(ratio)
             seen.add(ratio)
-    return ratios or [0.0]
+    return sorted(ratios) if ratios else [0.0]
 
 
 def resolve_score_orders(args):
@@ -63,6 +63,12 @@ def compute_scores(args, model, tokenizer, model_device, score_dir):
     return score_dir if score_dir is not None else scores
 
 
+def cleanup_cuda():
+    gc.collect()
+    if torch.cuda.is_available():
+        torch.cuda.empty_cache()
+
+
 def run_downstream_eval(args, model, tokenizer, model_device, out_dir, score_order, target_sparsity, actual_sparsity, examples):
     response_log_path = os.path.join(
         out_dir,
@@ -73,6 +79,8 @@ def run_downstream_eval(args, model, tokenizer, model_device, out_dir, score_ord
         f"score_order={score_order} sparsity={target_sparsity:.4f} "
         f"examples={args.downstream_max_examples} "
         f"batch_size={args.downstream_batch_size} "
+        f"generation_max_batch_tokens={args.downstream_generation_max_batch_tokens} "
+        f"use_cache={args.downstream_use_cache} "
         f"max_new_tokens={args.downstream_max_new_tokens} "
         f"max_prompt_length={args.downstream_max_prompt_length} "
         f"response_log_max={args.downstream_response_log_max} "
@@ -83,6 +91,8 @@ def run_downstream_eval(args, model, tokenizer, model_device, out_dir, score_ord
         max_prompt_length=args.downstream_max_prompt_length,
         max_new_tokens=args.downstream_max_new_tokens,
         batch_size=args.downstream_batch_size,
+        generation_max_batch_tokens=args.downstream_generation_max_batch_tokens,
+        use_cache=args.downstream_use_cache,
         temperature=args.downstream_temperature,
         top_p=args.downstream_top_p,
         top_k=args.downstream_top_k,
@@ -126,6 +136,56 @@ def run_downstream_eval(args, model, tokenizer, model_device, out_dir, score_ord
     print(f"downstream metrics score_order={score_order} sparsity={target_sparsity:.4f}: {metrics}")
 
 
+def run_model_evals(
+    args,
+    model,
+    tokenizer,
+    model_device,
+    out_dir,
+    result_csv_path,
+    eval_loader,
+    eval_seq_lens,
+    score_order,
+    target_sparsity,
+    actual_sparsity,
+    downstream_examples,
+):
+    if not args.skip_pp_eval:
+        for seq_len in eval_seq_lens:
+            model.seqlen = int(seq_len)
+            ppl_test = eval_ppl_with_loader(model, eval_loader, model_device)
+            print(
+                f"{args.pp_eval_data} perplexity {ppl_test} using score_order={score_order}, "
+                f"target_sparsity={target_sparsity:.4f}, pp_seqlen={seq_len}"
+            )
+            append_result_csv(
+                result_csv_path,
+                {
+                    "seed": args.seed,
+                    "method": args.prune_method,
+                    "score_order": score_order,
+                    "target_sparsity": f"{target_sparsity:.6f}",
+                    "actual_sparsity": f"{actual_sparsity:.6f}",
+                    "pp_eval_data": args.pp_eval_data,
+                    "pp_seq_len": int(seq_len),
+                    "ppl_test": f"{ppl_test:.6f}",
+                },
+            )
+
+    if args.do_downstream_eval:
+        run_downstream_eval(
+            args,
+            model,
+            tokenizer,
+            model_device,
+            out_dir,
+            score_order,
+            target_sparsity,
+            actual_sparsity,
+            downstream_examples,
+        )
+
+
 def run_score_eval(args, score_dir):
     model_device = resolve_model_device(args.model_device)
     print(f"Using {model_device} model device")
@@ -137,25 +197,22 @@ def run_score_eval(args, score_dir):
     tokenizer = get_tokenizer(args.model, args.cache_dir)
 
     score_source = None
+    reusable_model = None
     if args.prune_method == "random":
         print("Skipping score computation for random pruning.")
     else:
         model = get_llm(args.model, args.cache_dir, model_device, args.seqlen)
-        try:
-            model.eval()
-            score_source = compute_scores(args, model, tokenizer, model_device, score_dir)
-        finally:
-            del model
-            gc.collect()
-            if torch.cuda.is_available():
-                torch.cuda.empty_cache()
+        model.eval()
+        score_source = compute_scores(args, model, tokenizer, model_device, score_dir)
+        reusable_model = model
 
     if args.skip_pp_eval and not args.do_downstream_eval:
         print("Skipping PP eval and downstream eval.")
+        if reusable_model is not None:
+            del reusable_model
         del score_source
         del tokenizer
-        if torch.cuda.is_available():
-            torch.cuda.empty_cache()
+        cleanup_cuda()
         return
 
     eval_seq_lens = args.pp_seqlen if len(args.pp_seqlen) >= 1 else [args.seqlen]
@@ -195,101 +252,92 @@ def run_score_eval(args, score_dir):
             seed=args.seed,
         )
 
-    dense_eval_cache = None
-
     for score_order in score_orders:
-        for target_sparsity in sparsity_ratios:
-            if target_sparsity == 0 and dense_eval_cache is not None and not args.do_downstream_eval:
-                actual_sparsity, ppl_by_seq = dense_eval_cache
-                if args.skip_pp_eval:
-                    continue
-                for seq_len, ppl_test in ppl_by_seq:
-                    append_result_csv(
-                        result_csv_path,
-                        {
-                            "seed": args.seed,
-                            "method": args.prune_method,
-                            "score_order": score_order,
-                            "target_sparsity": f"{target_sparsity:.6f}",
-                            "actual_sparsity": f"{actual_sparsity:.6f}",
-                            "pp_eval_data": args.pp_eval_data,
-                            "pp_seq_len": int(seq_len),
-                            "ppl_test": f"{ppl_test:.6f}",
-                        },
+        if args.prune_method == "random":
+            for target_sparsity in sparsity_ratios:
+                current_model_device = resolve_model_device(args.model_device)
+                current_model = get_llm(args.model, args.cache_dir, current_model_device, args.seqlen)
+                try:
+                    current_model.eval()
+                    print(
+                        f"starting prune eval score_order={score_order} "
+                        f"sparsity={target_sparsity:.4f}"
                     )
-                continue
-
-            print(
-                f"starting prune eval score_order={score_order} "
-                f"sparsity={target_sparsity:.4f}"
-            )
-            current_model_device = resolve_model_device(args.model_device)
-            current_model = get_llm(args.model, args.cache_dir, current_model_device, args.seqlen)
-            try:
-                current_model.eval()
-                if target_sparsity > 0:
-                    if args.prune_method == "random":
+                    if target_sparsity > 0:
                         print(
                             f"Random pruning score_order={score_order} "
                             f"target_sparsity={target_sparsity:.4f}"
                         )
                         summary = prune_random(current_model, target_sparsity, score_order, args.seed, args.prune_ops)
-                    else:
                         print(
-                            f"Pruning with recomputed scores from {'memory' if score_dir is None else score_dir} "
-                            f"score_order={score_order} target_sparsity={target_sparsity:.4f}"
+                            f"{args.prune_method} prune summary: {summary['pruned']}/{summary['total']} "
+                            f"({summary['actual_sparsity']:.4f})"
                         )
-                        summary = prune_by_scores(current_model, score_source, target_sparsity, score_order, args.prune_ops)
+
+                    actual_sparsity = check_sparsity(current_model, args.prune_ops)
+                    run_model_evals(
+                        args,
+                        current_model,
+                        tokenizer,
+                        current_model_device,
+                        out_dir,
+                        result_csv_path,
+                        eval_loader,
+                        eval_seq_lens,
+                        score_order,
+                        target_sparsity,
+                        actual_sparsity,
+                        downstream_examples,
+                    )
+                finally:
+                    del current_model
+                    cleanup_cuda()
+            continue
+
+        current_model_device = resolve_model_device(args.model_device)
+        if reusable_model is None:
+            current_model = get_llm(args.model, args.cache_dir, current_model_device, args.seqlen)
+        else:
+            current_model = reusable_model
+            reusable_model = None
+
+        try:
+            current_model.eval()
+            for target_sparsity in sparsity_ratios:
+                print(
+                    f"starting prune eval score_order={score_order} "
+                    f"sparsity={target_sparsity:.4f}"
+                )
+                if target_sparsity > 0:
+                    print(
+                        f"Pruning with recomputed scores from {'memory' if score_dir is None else score_dir} "
+                        f"score_order={score_order} target_sparsity={target_sparsity:.4f}"
+                    )
+                    summary = prune_by_scores(current_model, score_source, target_sparsity, score_order, args.prune_ops)
                     print(
                         f"{args.prune_method} prune summary: {summary['pruned']}/{summary['total']} "
                         f"({summary['actual_sparsity']:.4f})"
                     )
 
                 actual_sparsity = check_sparsity(current_model, args.prune_ops)
-                ppl_by_seq = []
-                if not args.skip_pp_eval:
-                    for seq_len in eval_seq_lens:
-                        current_model.seqlen = int(seq_len)
-                        ppl_test = eval_ppl_with_loader(current_model, eval_loader, current_model_device)
-                        ppl_by_seq.append((int(seq_len), ppl_test))
-                        print(
-                            f"{args.pp_eval_data} perplexity {ppl_test} using score_order={score_order}, "
-                            f"target_sparsity={target_sparsity:.4f}, pp_seqlen={seq_len}"
-                        )
-                        append_result_csv(
-                            result_csv_path,
-                            {
-                                "seed": args.seed,
-                                "method": args.prune_method,
-                                "score_order": score_order,
-                                "target_sparsity": f"{target_sparsity:.6f}",
-                                "actual_sparsity": f"{actual_sparsity:.6f}",
-                                "pp_eval_data": args.pp_eval_data,
-                                "pp_seq_len": int(seq_len),
-                                "ppl_test": f"{ppl_test:.6f}",
-                            },
-                        )
+                run_model_evals(
+                    args,
+                    current_model,
+                    tokenizer,
+                    current_model_device,
+                    out_dir,
+                    result_csv_path,
+                    eval_loader,
+                    eval_seq_lens,
+                    score_order,
+                    target_sparsity,
+                    actual_sparsity,
+                    downstream_examples,
+                )
 
-                if args.do_downstream_eval:
-                    run_downstream_eval(
-                        args,
-                        current_model,
-                        tokenizer,
-                        current_model_device,
-                        out_dir,
-                        score_order,
-                        target_sparsity,
-                        actual_sparsity,
-                        downstream_examples,
-                    )
-
-                if target_sparsity == 0 and not args.skip_pp_eval:
-                    dense_eval_cache = (actual_sparsity, ppl_by_seq)
-            finally:
-                del current_model
-                gc.collect()
-                if torch.cuda.is_available():
-                    torch.cuda.empty_cache()
+        finally:
+            del current_model
+            cleanup_cuda()
 
     if not args.skip_pp_eval:
         drawn_path = draw_pp_vs_sparsity(result_csv_path, plot_path)
@@ -305,5 +353,4 @@ def run_score_eval(args, score_dir):
         del downstream_examples
     del score_source
     del tokenizer
-    if torch.cuda.is_available():
-        torch.cuda.empty_cache()
+    cleanup_cuda()

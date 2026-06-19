@@ -44,6 +44,8 @@ class DownstreamEvalConfig:
     max_prompt_length: int = 2048
     max_new_tokens: int = 2048
     batch_size: int = 1
+    generation_max_batch_tokens: int = 8192
+    use_cache: bool = False
     temperature: float = 0.0
     top_p: float = 1.0
     top_k: int = 0
@@ -328,6 +330,7 @@ def _generation_kwargs(model, tokenizer, args: argparse.Namespace | DownstreamEv
     generation_kwargs = {
         "max_new_tokens": args.max_new_tokens,
         "do_sample": do_sample,
+        "use_cache": bool(getattr(args, "use_cache", False)),
         "pad_token_id": tokenizer.pad_token_id,
         "eos_token_id": tokenizer.eos_token_id,
     }
@@ -348,9 +351,12 @@ def generate_response(model, tokenizer, prompt_text: str, args: argparse.Namespa
     ).to(device)
 
     generated = model.generate(**inputs, **_generation_kwargs(model, tokenizer, args))
-    response_ids = generated[0, inputs["input_ids"].shape[1] :]
+    response_ids = generated[0, inputs["input_ids"].shape[1] :].detach().cpu()
+    del inputs, generated
+    if torch.cuda.is_available():
+        torch.cuda.empty_cache()
     response = tokenizer.decode(response_ids, skip_special_tokens=True)
-    del inputs, generated, response_ids
+    del response_ids
     return response
 
 
@@ -368,13 +374,27 @@ def generate_responses(model, tokenizer, prompt_texts: list[str], args: argparse
     ).to(device)
     prompt_width = inputs["input_ids"].shape[1]
     generated = model.generate(**inputs, **_generation_kwargs(model, tokenizer, args))
+    generated = generated.detach().cpu()
+    del inputs
+    if torch.cuda.is_available():
+        torch.cuda.empty_cache()
 
     responses = []
     for row_idx in range(len(prompt_texts)):
         response_ids = generated[row_idx, prompt_width:]
         responses.append(tokenizer.decode(response_ids, skip_special_tokens=True))
-    del inputs, generated, response_ids
+    del generated, response_ids
     return responses
+
+
+def _effective_generation_batch_size(args: argparse.Namespace | DownstreamEvalConfig) -> int:
+    batch_size = max(1, int(getattr(args, "batch_size", 1)))
+    max_batch_tokens = int(getattr(args, "generation_max_batch_tokens", 0))
+    if max_batch_tokens <= 0:
+        return batch_size
+
+    tokens_per_example = max(1, int(args.max_prompt_length) + int(args.max_new_tokens))
+    return max(1, min(batch_size, max_batch_tokens // tokens_per_example))
 
 
 def evaluate_model_task_accuracy(
@@ -403,7 +423,13 @@ def evaluate_model_task_accuracy(
         output_handle = output_path.open("w", encoding="utf-8")
 
     try:
-        batch_size = max(1, int(getattr(args, "batch_size", 1)))
+        requested_batch_size = max(1, int(getattr(args, "batch_size", 1)))
+        batch_size = _effective_generation_batch_size(args)
+        if batch_size < requested_batch_size:
+            print(
+                f"using downstream generation microbatch={batch_size} "
+                f"(requested={requested_batch_size}, max_batch_tokens={getattr(args, 'generation_max_batch_tokens', 0)})"
+            )
         with torch.inference_mode():
             with tqdm(total=len(examples), desc="Evaluating") as progress:
                 for batch_start in range(0, len(examples), batch_size):
@@ -528,6 +554,8 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--max_prompt_length", type=int, default=2048)
     parser.add_argument("--max_new_tokens", type=int, default=2048)
     parser.add_argument("--batch_size", type=int, default=1)
+    parser.add_argument("--generation_max_batch_tokens", type=int, default=8192, help="Cap prompt+generation tokens per generation microbatch. Use <=0 to disable.")
+    parser.add_argument("--use_cache", action="store_true", help="Use generation KV cache. Faster but uses more GPU memory.")
     parser.add_argument("--temperature", type=float, default=0.0)
     parser.add_argument("--top_p", type=float, default=1.0)
     parser.add_argument("--top_k", type=int, default=0)

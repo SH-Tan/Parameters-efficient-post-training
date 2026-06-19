@@ -11,7 +11,7 @@ def compute_sparsegpt_scores(args, model, tokenizer, device=torch.device("cuda:0
     use_cache = model.config.use_cache
     model.config.use_cache = False
 
-    inps = outs = None
+    inps = outs = attention_mask = position_ids = None
     try:
         print(f"loading calibration data for SparseGPT scores with seqlen={model.seqlen}")
         dataloader, _ = get_loaders(
@@ -125,6 +125,6 @@ def compute_sparsegpt_scores(args, model, tokenizer, device=torch.device("cuda:0
         return sparsegpt_scores
     finally:
         model.config.use_cache = use_cache
-        del inps, outs
+        del inps, outs, attention_mask, position_ids
         if torch.cuda.is_available():
             torch.cuda.empty_cache()
