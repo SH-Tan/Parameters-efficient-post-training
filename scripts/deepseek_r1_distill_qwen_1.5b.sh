@@ -128,7 +128,7 @@ vllm_tensor_parallel_size="${vllm_tensor_parallel_size:-2}"
 #     fi
 #     [ "${vllm_tensor_parallel_size:-0}" -ge 1 ] 2>/dev/null || vllm_tensor_parallel_size="1"
 # fi
-vllm_gpu_memory_utilization="${vllm_gpu_memory_utilization:-0.9}"
+vllm_gpu_memory_utilization="${vllm_gpu_memory_utilization:-0.7}"
 vllm_dtype="${vllm_dtype:-auto}"
 
 downstream_max_examples="${downstream_max_examples:-500}"
