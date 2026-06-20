@@ -2,8 +2,16 @@ import csv
 import os
 
 
+def safe_result_component(value):
+    text = str(value).strip().replace(os.sep, "__")
+    if os.altsep:
+        text = text.replace(os.altsep, "__")
+    text = text.replace(":", "_")
+    return text.strip("._") or "dataset"
+
+
 def result_dir(args):
-    path = os.path.join(args.save, "results", args.calib_data, f"seq_len_{args.seqlen}")
+    path = os.path.join(args.save, "results", safe_result_component(args.calib_data), f"seq_len_{args.seqlen}")
     os.makedirs(path, exist_ok=True)
     return path
 
@@ -36,6 +44,8 @@ def append_downstream_result_csv(csv_path, row):
         "target_sparsity",
         "actual_sparsity",
         "task_data",
+        "backend",
+        "pruned_model_path",
         "num_examples",
         "num_scored",
         "num_unscored",
@@ -71,7 +81,7 @@ def method_result_csv(run_root, method, calib_data, seq_len):
         run_root,
         method,
         "results",
-        calib_data,
+        safe_result_component(calib_data),
         f"seq_len_{seq_len}",
         "pp_eval_results.csv",
     )
@@ -82,7 +92,7 @@ def method_downstream_csv(run_root, method, calib_data, seq_len):
         run_root,
         method,
         "results",
-        calib_data,
+        safe_result_component(calib_data),
         f"seq_len_{seq_len}",
         "downstream_task_results.csv",
     )

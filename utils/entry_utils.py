@@ -60,8 +60,7 @@ def add_common_prune_args(parser, require_model=True, default_model=None, model_
         "--calib_data",
         type=str,
         default="c4",
-        choices=CALIB_DATASETS,
-        help="Calibration data for score calculation.",
+        help="Calibration data for score calculation. Use a known dataset alias or a local parquet path.",
     )
     parser.add_argument("--seqlen", type=int, default=1024, help="Calibration sequence length.")
     parser.add_argument(
@@ -100,6 +99,12 @@ def add_common_prune_args(parser, require_model=True, default_model=None, model_
     parser.add_argument("--downstream_top_p", type=float, default=1.0)
     parser.add_argument("--downstream_top_k", type=int, default=0)
     parser.add_argument("--downstream_response_log_max", type=int, default=-1, help="Maximum downstream responses to write; -1 writes all.")
+    parser.add_argument("--downstream_backend", choices=["transformers", "vllm"], default="transformers", help="Generation backend for downstream eval.")
+    parser.add_argument("--vllm_tensor_parallel_size", type=int, default=1)
+    parser.add_argument("--vllm_gpu_memory_utilization", type=float, default=0.9)
+    parser.add_argument("--vllm_dtype", default="auto")
+    parser.add_argument("--save_pruned_model", action="store_true", help="Save each evaluated pruned model as a HF checkpoint.")
+    parser.add_argument("--pruned_model_root", default=None, help="Optional root directory for saved pruned checkpoints. Defaults under --save.")
     parser.add_argument(
         "--save_score_pkl",
         dest="save_score_pkl",

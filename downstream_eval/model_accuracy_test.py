@@ -50,6 +50,11 @@ class DownstreamEvalConfig:
     top_p: float = 1.0
     top_k: int = 0
     response_log_max: int = -1
+    backend: str = "transformers"
+    model_path: str | None = None
+    tensor_parallel_size: int = 1
+    gpu_memory_utilization: float = 0.9
+    dtype: str = "auto"
 
 
 def resolve_dtype(name: str) -> torch.dtype:
@@ -324,6 +329,19 @@ def score_response(
     return float(score)
 
 
+def _sampling_kwargs(args: argparse.Namespace | DownstreamEvalConfig) -> dict[str, Any]:
+    do_sample = args.temperature > 0
+    kwargs = {
+        "temperature": float(args.temperature) if do_sample else 0.0,
+        "top_p": float(args.top_p),
+        "max_tokens": int(args.max_new_tokens),
+    }
+    top_k = int(getattr(args, "top_k", 0))
+    if top_k > 0:
+        kwargs["top_k"] = top_k
+    return kwargs
+
+
 def _generation_kwargs(model, tokenizer, args: argparse.Namespace | DownstreamEvalConfig) -> dict[str, Any]:
     do_sample = args.temperature > 0
 
@@ -424,6 +442,161 @@ def _generation_microbatches(examples: list[ExampleRecord], tokenizer, args: arg
         yield batch
 
 
+def _open_response_log(output_path: str | Path | None):
+    if output_path is None:
+        return None
+    output_path = Path(output_path).expanduser()
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+    return output_path.open("w", encoding="utf-8")
+
+
+def _score_generated_responses(
+    examples: list[ExampleRecord],
+    responses: list[str],
+    *,
+    output_handle,
+    response_log_max: int,
+    logged_responses: int,
+    reward_score_dir: str | Path | None = None,
+) -> tuple[list[float], list[bool], int, int]:
+    scores: list[float] = []
+    correct: list[bool] = []
+    num_unscored = 0
+
+    if len(examples) != len(responses):
+        raise ValueError(f"Response count mismatch: {len(responses)} responses for {len(examples)} examples")
+
+    for example, response in zip(examples, responses):
+        row = None
+        should_log_response = output_handle is not None and (
+            response_log_max < 0 or logged_responses < response_log_max
+        )
+        if should_log_response:
+            row = {"example_id": example.example_id, "prompt": example.prompt_text, "response": response}
+        if example.ground_truth is None:
+            num_unscored += 1
+            if row is not None:
+                row["task_score"] = None
+        else:
+            score = score_response(example, response, reward_score_dir=reward_score_dir)
+            is_correct = bool(score == 1.0)
+            scores.append(score)
+            correct.append(is_correct)
+            if row is not None:
+                row["task_score"] = score
+                row["is_correct"] = is_correct
+
+        if row is not None:
+            output_handle.write(json.dumps(row, ensure_ascii=False) + "\n")
+            output_handle.flush()
+            logged_responses += 1
+
+    return scores, correct, num_unscored, logged_responses
+
+
+def _metrics_from_scores(num_examples: int, scores: list[float], correct: list[bool], num_unscored: int) -> dict[str, Any]:
+    metrics = {
+        "num_examples": num_examples,
+        "num_scored": len(scores),
+        "num_unscored": num_unscored,
+    }
+    if scores:
+        metrics.update(
+            {
+                "pass@1": float(np.mean(correct)),
+                "accuracy": float(np.mean(correct)),
+                "mean_score": float(np.mean(scores)),
+                "score_sum": float(np.sum(scores)),
+                "num_correct": int(np.sum(correct)),
+            }
+        )
+    return metrics
+
+
+def _vllm_outputs_to_texts(outputs) -> list[str]:
+    texts = []
+    for output in outputs:
+        if not output.outputs:
+            texts.append("")
+        else:
+            texts.append(output.outputs[0].text)
+    return texts
+
+
+def evaluate_vllm_task_accuracy(
+    model_path: str | Path,
+    tokenizer,
+    examples: list[ExampleRecord],
+    args: argparse.Namespace | DownstreamEvalConfig,
+    *,
+    output_path: str | Path | None = None,
+    reward_score_dir: str | Path | None = None,
+) -> dict[str, Any]:
+    if not examples:
+        raise ValueError("No examples were loaded. Check dataset path and slicing arguments.")
+
+    try:
+        from vllm import LLM, SamplingParams
+    except ImportError as exc:
+        raise ImportError("downstream_backend='vllm' requires the vllm package in the active environment") from exc
+
+    llm = LLM(
+        model=str(model_path),
+        tokenizer=str(model_path),
+        tensor_parallel_size=max(1, int(getattr(args, "tensor_parallel_size", 1))),
+        gpu_memory_utilization=float(getattr(args, "gpu_memory_utilization", 0.9)),
+        dtype=str(getattr(args, "dtype", "auto")),
+        max_model_len=int(args.max_prompt_length) + int(args.max_new_tokens),
+        trust_remote_code=True,
+        enforce_eager=True,
+    )
+    sampling_params = SamplingParams(**_sampling_kwargs(args))
+    response_log_max = int(getattr(args, "response_log_max", -1))
+    logged_responses = 0
+    scores: list[float] = []
+    correct: list[bool] = []
+    num_unscored = 0
+    output_handle = _open_response_log(output_path)
+
+    try:
+        requested_batch_size = max(1, int(getattr(args, "batch_size", 1)))
+        max_batch_tokens = int(getattr(args, "generation_max_batch_tokens", 0))
+        if max_batch_tokens > 0:
+            print(
+                f"using vLLM downstream dynamic microbatches "
+                f"(requested_batch={requested_batch_size}, max_batch_tokens={max_batch_tokens})"
+            )
+        with tqdm(total=len(examples), desc="Evaluating") as progress:
+            for batch_examples in _generation_microbatches(examples, tokenizer, args):
+                prompts = [example.prompt_text for example in batch_examples]
+                outputs = llm.generate(prompts, sampling_params, use_tqdm=False)
+                responses = _vllm_outputs_to_texts(outputs)
+                batch_scores, batch_correct, batch_unscored, logged_responses = _score_generated_responses(
+                    batch_examples,
+                    responses,
+                    output_handle=output_handle,
+                    response_log_max=response_log_max,
+                    logged_responses=logged_responses,
+                    reward_score_dir=reward_score_dir,
+                )
+                scores.extend(batch_scores)
+                correct.extend(batch_correct)
+                num_unscored += batch_unscored
+                progress.update(len(batch_examples))
+    finally:
+        if output_handle is not None:
+            output_handle.close()
+        try:
+            llm.shutdown()
+        except AttributeError:
+            pass
+        del llm
+        if torch.cuda.is_available():
+            torch.cuda.empty_cache()
+
+    return _metrics_from_scores(len(examples), scores, correct, num_unscored)
+
+
 def evaluate_model_task_accuracy(
     model,
     tokenizer,
@@ -440,14 +613,9 @@ def evaluate_model_task_accuracy(
     scores: list[float] = []
     correct: list[bool] = []
     num_unscored = 0
-    output_handle = None
     response_log_max = int(getattr(args, "response_log_max", -1))
     logged_responses = 0
-
-    if output_path is not None:
-        output_path = Path(output_path).expanduser()
-        output_path.parent.mkdir(parents=True, exist_ok=True)
-        output_handle = output_path.open("w", encoding="utf-8")
+    output_handle = _open_response_log(output_path)
 
     try:
         requested_batch_size = max(1, int(getattr(args, "batch_size", 1)))
@@ -467,34 +635,17 @@ def evaluate_model_task_accuracy(
                         args,
                         device,
                     )
-
-                    for example, response in zip(batch_examples, responses):
-                        row = None
-                        should_log_response = (
-                            output_handle is not None
-                            and (response_log_max < 0 or logged_responses < response_log_max)
-                        )
-                        if should_log_response:
-                            row = {"example_id": example.example_id, "prompt": example.prompt_text, "response": response}
-                        if example.ground_truth is None:
-                            num_unscored += 1
-                            if row is not None:
-                                row["task_score"] = None
-                        else:
-                            score = score_response(example, response, reward_score_dir=reward_score_dir)
-                            is_correct = bool(score == 1.0)
-                            scores.append(score)
-                            correct.append(is_correct)
-                            if row is not None:
-                                row["task_score"] = score
-                                row["is_correct"] = is_correct
-
-                        if row is not None:
-                            output_handle.write(json.dumps(row, ensure_ascii=False) + "\n")
-                            output_handle.flush()
-                            logged_responses += 1
-                        del response, row
-
+                    batch_scores, batch_correct, batch_unscored, logged_responses = _score_generated_responses(
+                        batch_examples,
+                        responses,
+                        output_handle=output_handle,
+                        response_log_max=response_log_max,
+                        logged_responses=logged_responses,
+                        reward_score_dir=reward_score_dir,
+                    )
+                    scores.extend(batch_scores)
+                    correct.extend(batch_correct)
+                    num_unscored += batch_unscored
                     progress.update(len(batch_examples))
                     del responses, batch_examples
                     if torch.cuda.is_available():
@@ -503,24 +654,9 @@ def evaluate_model_task_accuracy(
         if output_handle is not None:
             output_handle.close()
 
-    metrics = {
-        "num_examples": len(examples),
-        "num_scored": len(scores),
-        "num_unscored": num_unscored,
-    }
-    if scores:
-        metrics.update(
-            {
-                "pass@1": float(np.mean(correct)),
-                "accuracy": float(np.mean(correct)),
-                "mean_score": float(np.mean(scores)),
-                "score_sum": float(np.sum(scores)),
-                "num_correct": int(np.sum(correct)),
-            }
-        )
     if torch.cuda.is_available():
         torch.cuda.empty_cache()
-    return metrics
+    return _metrics_from_scores(len(examples), scores, correct, num_unscored)
 
 
 def evaluate_downstream_task_accuracy(
@@ -555,14 +691,28 @@ def evaluate_downstream_task_accuracy(
             seed=seed,
         )
     eval_config = config or DownstreamEvalConfig(device=str(_model_device(model)))
-    return evaluate_model_task_accuracy(
-        model,
-        tokenizer,
-        examples,
-        eval_config,
-        output_path=output_path,
-        reward_score_dir=reward_score_dir,
-    )
+    backend = getattr(eval_config, "backend", "transformers")
+    if backend == "transformers":
+        return evaluate_model_task_accuracy(
+            model,
+            tokenizer,
+            examples,
+            eval_config,
+            output_path=output_path,
+            reward_score_dir=reward_score_dir,
+        )
+    if backend == "vllm":
+        if not eval_config.model_path:
+            raise ValueError("vLLM downstream eval requires config.model_path pointing to a saved HF checkpoint")
+        return evaluate_vllm_task_accuracy(
+            eval_config.model_path,
+            tokenizer,
+            examples,
+            eval_config,
+            output_path=output_path,
+            reward_score_dir=reward_score_dir,
+        )
+    raise ValueError(f"Unsupported downstream backend: {backend}")
 
 
 def parse_args() -> argparse.Namespace:

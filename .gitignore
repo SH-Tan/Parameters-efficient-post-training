@@ -279,3 +279,5 @@ curv_pkl/
 out/
 .codex
 .agents
+
+**dataset/**

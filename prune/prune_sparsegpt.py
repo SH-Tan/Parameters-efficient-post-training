@@ -1,4 +1,5 @@
 import torch
+from tqdm.auto import tqdm
 
 from eval.data import get_loaders
 from prune import as_device, filter_prune_ops, find_layers, prepare_calibration_input
@@ -33,7 +34,7 @@ def compute_sparsegpt_scores(args, model, tokenizer, device=torch.device("cuda:0
         sparsegpt_scores = [] if save_dir is None else None
         batch_size = max(1, int(getattr(args, "calib_forward_batch_size", 1)))
 
-        for layer_idx, layer in enumerate(layers):
+        for layer_idx, layer in enumerate(tqdm(layers, desc="SparseGPT score layers", unit="layer")):
             subset = filter_prune_ops(find_layers(layer), args.prune_ops)
 
             dev = as_device(device)
@@ -59,7 +60,7 @@ def compute_sparsegpt_scores(args, model, tokenizer, device=torch.device("cuda:0
             ]
 
             try:
-                for batch_start in range(0, args.nsamples, batch_size):
+                for batch_start in tqdm(range(0, args.nsamples, batch_size), desc=f"SparseGPT layer {layer_idx} calibration", unit="batch", leave=False):
                     batch_end = min(batch_start + batch_size, args.nsamples)
                     current_batch_size = batch_end - batch_start
                     with torch.no_grad():

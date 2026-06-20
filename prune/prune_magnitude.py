@@ -1,4 +1,5 @@
 import torch
+from tqdm.auto import tqdm
 
 from prune import filter_prune_ops, find_layers
 from utils.score_io_utils import save_layer_scores_pkl
@@ -8,7 +9,7 @@ def compute_magnitude_scores(model, save_dir=None, prune_ops=None):
     layers = model.model.layers
     all_scores = [] if save_dir is None else None
 
-    for layer_idx, layer in enumerate(layers):
+    for layer_idx, layer in enumerate(tqdm(layers, desc="Magnitude score layers", unit="layer")):
         subset = filter_prune_ops(find_layers(layer), prune_ops)
         layer_scores = {}
         for name, module in subset.items():
