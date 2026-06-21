@@ -103,6 +103,7 @@ def add_common_prune_args(parser, require_model=True, default_model=None, model_
     parser.add_argument("--vllm_tensor_parallel_size", type=int, default=1)
     parser.add_argument("--vllm_gpu_memory_utilization", type=float, default=0.9)
     parser.add_argument("--vllm_dtype", default="auto")
+    parser.add_argument("--vllm_python", default=None, help="Python executable for the isolated vLLM downstream subprocess.")
     parser.add_argument("--save_pruned_model", action="store_true", help="Save each evaluated pruned model as a HF checkpoint.")
     parser.add_argument("--pruned_model_root", default=None, help="Optional root directory for saved pruned checkpoints. Defaults under --save.")
     parser.add_argument(

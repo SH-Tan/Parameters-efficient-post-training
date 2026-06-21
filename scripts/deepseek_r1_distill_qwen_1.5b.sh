@@ -37,6 +37,7 @@ main_py="${main_py:-main.py}"
 
 export MPLCONFIGDIR="${MPLCONFIGDIR:-/tmp/matplotlib-${USER:-$(id -un)}}"
 export PYTORCH_CUDA_ALLOC_CONF="${PYTORCH_CUDA_ALLOC_CONF:-expandable_segments:True}"
+export CUDA_VISIBLE_DEVICES="${CUDA_VISIBLE_DEVICES:-1}"
 mkdir -p "$MPLCONFIGDIR"
 
 log_stage() {
@@ -47,11 +48,11 @@ log_stage() {
 # 2. Model / data / output locations
 # -----------------------------------------------------------------------------
 
-model="${model:-/data/shuozhe/saved_model/Qwen2.5-0.5B}"
+model="${model:-deepseek-ai/DeepSeek-R1-Distill-Qwen-1.5B}"
 cache_dir="${cache_dir:-llm_weights}"
-calib_data="${calib_data:-/data/shuozhe/Parameters-efficient-post-training/dataset/deepseek1.5b/dsk_1d5_8192.parquet}"
+calib_data="${calib_data:-dataset/deepseek1.5b/dsk_1d5_8192.parquet}"
 pp_eval_data="${pp_eval_data:-wikitext2}"
-downstream_task_data="${downstream_task_data:-/data/shuozhe/saved_dataset/MetaMathQA-math-500/test.parquet}"
+downstream_task_data="${downstream_task_data:-dataset/mathqa500/test.parquet}"
 downstream_prompt_key="${downstream_prompt_key:-prompt}"
 downstream_response_key="${downstream_response_key:-}"
 downstream_reward_score_dir="${downstream_reward_score_dir:-}"
@@ -63,7 +64,7 @@ output_root="${output_root:-out/deepseek_r1_distill_qwen_1.5b}"
 
 run_magnitude="${run_magnitude:-1}"
 run_sparsegpt="${run_sparsegpt:-0}"
-run_wanda="${run_wanda:-0}"
+run_wanda="${run_wanda:-1}"
 run_random="${run_random:-0}"
 
 run_pp_eval="${run_pp_eval:-0}"
@@ -102,10 +103,10 @@ random_save_dir="${random_save_dir:-$run_dir/random}"
 nsamples="${nsamples:-128}"
 seed="${seed:-42}"
 seq_len="${seq_len:-8192}"
-pp_seqlen="${pp_seqlen:-8192}"
+pp_seqlen="${pp_seqlen:-2048}"
 
-sparsity_ratios="${sparsity_ratios:-0 0.1 0.2 0.3 0.4 0.5}"
-score_orders="${score_orders:-per_op local global}"
+sparsity_ratios="${sparsity_ratios:-0 0.1 0.2 0.3 0.4 0.5 0.6 0.7}"
+score_orders="${score_orders:-per_op}"
 prune_ops="${prune_ops:-}"          # empty = all ops
 
 calib_forward_batch_size="${calib_forward_batch_size:-128}"
@@ -119,7 +120,7 @@ model_device="${model_device:-auto_free}"
 # 5. Downstream eval parameters
 # -----------------------------------------------------------------------------
 downstream_backend="${downstream_backend:-vllm}"
-vllm_tensor_parallel_size="${vllm_tensor_parallel_size:-2}"
+vllm_tensor_parallel_size="${vllm_tensor_parallel_size:-1}"
 # if [ -z "${vllm_tensor_parallel_size:-}" ]; then
 #     if command -v nvidia-smi >/dev/null 2>&1; then
 #         vllm_tensor_parallel_size="$(nvidia-smi -L 2>/dev/null | wc -l | tr -d ' ')"
@@ -130,12 +131,13 @@ vllm_tensor_parallel_size="${vllm_tensor_parallel_size:-2}"
 # fi
 vllm_gpu_memory_utilization="${vllm_gpu_memory_utilization:-0.7}"
 vllm_dtype="${vllm_dtype:-auto}"
+vllm_python="${vllm_python:-}"
 
 downstream_max_examples="${downstream_max_examples:-500}"
 downstream_start_index="${downstream_start_index:-0}"
 downstream_shuffle="${downstream_shuffle:-0}"
-downstream_batch_size="${downstream_batch_size:-32}"
-downstream_generation_max_batch_tokens="${downstream_generation_max_batch_tokens:-32768}"
+downstream_batch_size="${downstream_batch_size:-64}"
+downstream_generation_max_batch_tokens="${downstream_generation_max_batch_tokens:-491520}"
 downstream_use_cache="${downstream_use_cache:-1}"
 downstream_max_prompt_length="${downstream_max_prompt_length:-2048}"
 downstream_max_new_tokens="${downstream_max_new_tokens:-8192}"
@@ -150,7 +152,7 @@ pruned_model_root="${pruned_model_root:-}"
 # 6. Plotting parameters
 # -----------------------------------------------------------------------------
 
-plot_max_sparsity="${plot_max_sparsity:-0.7}"
+plot_max_sparsity="${plot_max_sparsity:-0.5}"
 
 # =============================================================================
 # Build CLI flag arrays from the config above
@@ -205,6 +207,7 @@ build_downstream_eval_flags() {
 
     [ -n "$downstream_response_key" ] && flags+=(--downstream_response_key "$downstream_response_key")
     [ -n "$downstream_reward_score_dir" ] && flags+=(--downstream_reward_score_dir "$downstream_reward_score_dir")
+    [ -n "$vllm_python" ] && flags+=(--vllm_python "$vllm_python")
     [ "$save_pruned_model" = "1" ] && flags+=(--save_pruned_model)
     [ -n "$pruned_model_root" ] && flags+=(--pruned_model_root "$pruned_model_root")
     [ "$downstream_shuffle" = "1" ] && flags+=(--downstream_shuffle)

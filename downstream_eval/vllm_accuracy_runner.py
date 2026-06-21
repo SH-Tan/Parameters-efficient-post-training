@@ -264,7 +264,7 @@ def _sampling_params(args: argparse.Namespace):
 
 def main() -> None:
     args = parse_args()
-    tokenizer = AutoTokenizer.from_pretrained(args.model_path, use_fast=False)
+    tokenizer = AutoTokenizer.from_pretrained(args.model_path, use_fast=True)
     if tokenizer.pad_token_id is None:
         tokenizer.pad_token = tokenizer.eos_token
     tokenizer.padding_side = "left"
