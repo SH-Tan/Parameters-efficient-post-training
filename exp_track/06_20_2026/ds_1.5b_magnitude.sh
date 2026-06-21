@@ -155,6 +155,8 @@ run_plots="${run_plots:-1}"
 
 save_score_pkl="${save_score_pkl:-0}"
 clear_results="${clear_results:-1}"
+stream_method_log="${stream_method_log:-1}"
+keep_worker_log="${keep_worker_log:-1}"
 
 # plot_only=1 -> skip all pruning/eval, just regenerate plots for a run.
 plot_only="${plot_only:-0}"
@@ -356,27 +358,34 @@ run_method() {
     while IFS= read -r line; do [ -n "$line" ] && pp_eval_flags+=("$line"); done < <(build_pp_eval_flags)
     while IFS= read -r line; do [ -n "$line" ] && downstream_flags+=("$line"); done < <(build_downstream_eval_flags)
 
-    "$python_bin" "$main_py" \
-        --model "$model" \
-        --prune_method "$method" \
-        --save "$method_save_dir" \
-        --cache_dir "$cache_dir" \
-        --calib_data "$calib_data" \
-        --pp_eval_data "$pp_eval_data" \
-        --nsamples "$nsamples" \
-        --seed "$seed" \
-        --model_device "$model_device" \
-        --calib_forward_batch_size "$method_calib_batch_size" \
-        --sparsegpt_hessian_chunk_size "$sparsegpt_hessian_chunk_size" \
-        --seqlen "$seq_len" \
-        --pp_seqlen "$pp_seqlen" \
-        --sparsity_ratio $sparsity_ratios \
-        --score_order $score_orders \
-        "${prune_ops_flags[@]}" \
-        "$(build_score_pkl_flag)" \
-        "${pp_eval_flags[@]}" \
-        "${downstream_flags[@]}" \
-        >> "$method_log" 2>&1
+    local cmd=(
+        "$python_bin" "$main_py"
+        --model "$model"
+        --prune_method "$method"
+        --save "$method_save_dir"
+        --cache_dir "$cache_dir"
+        --calib_data "$calib_data"
+        --pp_eval_data "$pp_eval_data"
+        --nsamples "$nsamples"
+        --seed "$seed"
+        --model_device "$model_device"
+        --calib_forward_batch_size "$method_calib_batch_size"
+        --sparsegpt_hessian_chunk_size "$sparsegpt_hessian_chunk_size"
+        --seqlen "$seq_len"
+        --pp_seqlen "$pp_seqlen"
+        --sparsity_ratio $sparsity_ratios
+        --score_order $score_orders
+        "${prune_ops_flags[@]}"
+        "$(build_score_pkl_flag)"
+        "${pp_eval_flags[@]}"
+        "${downstream_flags[@]}"
+    )
+
+    if [ "$stream_method_log" = "1" ]; then
+        "${cmd[@]}" 2>&1 | tee -a "$method_log"
+    else
+        "${cmd[@]}" >> "$method_log" 2>&1
+    fi
 
     log_stage "Finished method=$method save_dir=$method_save_dir score_orders=$score_orders prune_ops=${prune_ops:-all}" | tee -a "$method_log"
 }
@@ -473,15 +482,26 @@ run_methods_multi_node() {
         local node="${nodes[$((method_index % ${#nodes[@]}))]}"
         local worker_log="$multi_node_log_dir/${method}.log"
         log_stage "Launching method=$method on node=$node log=$worker_log"
-        "$srun_bin" --nodes=1 --ntasks=1 --cpus-per-task="$slurm_cpus_per_task" $srun_gpu_args -w "$node" \
-            "$system_bash_bin" -c 'source "$1/bin/activate" &&
-                export PYTHONPATH="$2"
-                export VLLM_WORKER_MULTIPROC_METHOD=spawn VLLM_USE_V1=1 VLLM_NO_USAGE_STATS=1
-                export multi_node_worker=1 worker_method="$3" multi_node=0 run_name="$4"
-                export python_bin="$5" main_py="$6" script_path="$7"
-                exec "$8" "$7"' \
-            _ "$VENV" "$PYTHONPATH" "$method" "$run_name" "$python_bin" "$main_py" "$script_path" "$system_bash_bin" \
-            > "$worker_log" 2>&1 &
+        if [ "$keep_worker_log" = "1" ]; then
+            "$srun_bin" --nodes=1 --ntasks=1 --cpus-per-task="$slurm_cpus_per_task" $srun_gpu_args -w "$node" \
+                "$system_bash_bin" -c 'source "$1/bin/activate" &&
+                    export PYTHONPATH="$2"
+                    export VLLM_WORKER_MULTIPROC_METHOD=spawn VLLM_USE_V1=1 VLLM_NO_USAGE_STATS=1
+                    export multi_node_worker=1 worker_method="$3" multi_node=0 run_name="$4"
+                    export python_bin="$5" main_py="$6" script_path="$7"
+                    exec "$8" "$7"' \
+                _ "$VENV" "$PYTHONPATH" "$method" "$run_name" "$python_bin" "$main_py" "$script_path" "$system_bash_bin" \
+                2>&1 | tee "$worker_log" &
+        else
+            "$srun_bin" --nodes=1 --ntasks=1 --cpus-per-task="$slurm_cpus_per_task" $srun_gpu_args -w "$node" \
+                "$system_bash_bin" -c 'source "$1/bin/activate" &&
+                    export PYTHONPATH="$2"
+                    export VLLM_WORKER_MULTIPROC_METHOD=spawn VLLM_USE_V1=1 VLLM_NO_USAGE_STATS=1
+                    export multi_node_worker=1 worker_method="$3" multi_node=0 run_name="$4"
+                    export python_bin="$5" main_py="$6" script_path="$7"
+                    exec "$8" "$7"' \
+                _ "$VENV" "$PYTHONPATH" "$method" "$run_name" "$python_bin" "$main_py" "$script_path" "$system_bash_bin" &
+        fi
         pids+=("$!")
         method_index=$((method_index + 1))
     done
@@ -547,6 +567,8 @@ echo "Magnitude save dir:     $magnitude_save_dir"
 echo "SparseGPT save dir:     $sparsegpt_save_dir"
 echo "Random save dir:        $random_save_dir"
 echo "Pruned checkpoint root: $pruned_model_root"
+echo "Stream method log:      $stream_method_log"
+echo "Keep worker log:        $keep_worker_log"
 
 if [ "$plot_only" = "1" ]; then
     log_stage "Plot-only mode: regenerating plots for run $run_name"
