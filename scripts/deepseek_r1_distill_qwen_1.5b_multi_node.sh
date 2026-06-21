@@ -37,12 +37,6 @@ set -euo pipefail
 # 1. Python / environment
 # -----------------------------------------------------------------------------
 
-python_bin="${python_bin:-python}"
-conda_python="/home/tans5/anaconda3/envs/prune_llm/bin/python"
-if [ "$python_bin" = "python" ] && [ -x "$conda_python" ]; then
-    python_bin="$conda_python"
-fi
-
 submit_dir="${SLURM_SUBMIT_DIR:-$PWD}"
 if [ -f "$submit_dir/main.py" ] && [ -d "$submit_dir/scripts" ]; then
     repo_root="$(cd "$submit_dir" && pwd)"
@@ -69,6 +63,15 @@ if command -v module >/dev/null 2>&1; then
     module load nvidia/25.9 || true
 fi
 
+VENV="${VENV:-/work/09576/shuozhe/verl_setup_tacc/.venv}"
+if [ ! -f "${VENV}/bin/activate" ]; then
+    echo "Missing venv activation script: ${VENV}/bin/activate" >&2
+    echo "Set VENV=/absolute/path/to/venv, matching the working GRPO scripts." >&2
+    exit 1
+fi
+source "${VENV}/bin/activate"
+python_bin="${python_bin:-$(command -v python3)}"
+
 export PYTHONPATH="$repo_root${PYTHONPATH:+:$PYTHONPATH}"
 export PYTHONUNBUFFERED="${PYTHONUNBUFFERED:-1}"
 export TOKENIZERS_PARALLELISM="${TOKENIZERS_PARALLELISM:-true}"
@@ -83,15 +86,30 @@ log_stage() {
     printf '\n[%s] %s\n' "$(date '+%Y-%m-%d %H:%M:%S')" "$*"
 }
 
+first_executable() {
+    local candidate=""
+    for candidate in "$@"; do
+        [ -n "$candidate" ] && [ -x "$candidate" ] && printf '%s\n' "$candidate" && return 0
+    done
+    return 1
+}
+
+command_path_if_executable() {
+    local command_name="$1"
+    local resolved=""
+    resolved="$(command -v "$command_name" 2>/dev/null || true)"
+    [ -n "$resolved" ] && [ -x "$resolved" ] && printf '%s\n' "$resolved"
+}
+
 # -----------------------------------------------------------------------------
 # 2. Model / data / output locations
 # -----------------------------------------------------------------------------
 
-model="${model:-/data/shuozhe/saved_model/Qwen2.5-0.5B}"
+model="${model:-/work2/09576/shuozhe/saved_model/Qwen2.5-0.5B}"
 cache_dir="${cache_dir:-llm_weights}"
-calib_data="${calib_data:-/data/shuozhe/Parameters-efficient-post-training/dataset/deepseek1.5b/dsk_1d5_8192.parquet}"
+calib_data="${calib_data:-$repo_root/dataset/deepseek1.5b/dsk_1d5_8192.parquet}"
 pp_eval_data="${pp_eval_data:-wikitext2}"
-downstream_task_data="${downstream_task_data:-/data/shuozhe/saved_dataset/MetaMathQA-math-500/test.parquet}"
+downstream_task_data="${downstream_task_data:-/work2/09576/shuozhe/saved_dataset/MetaMathQA-math-500/test.parquet}"
 downstream_prompt_key="${downstream_prompt_key:-prompt}"
 downstream_response_key="${downstream_response_key:-}"
 downstream_reward_score_dir="${downstream_reward_score_dir:-}"
@@ -111,6 +129,9 @@ fi
 multi_node="${multi_node:-1}"
 gpus_per_task="${gpus_per_task:-${SLURM_GPUS_PER_TASK:-1}}"
 slurm_cpus_per_task="${SLURM_CPUS_PER_TASK:-1}"
+system_bash_bin="${system_bash_bin:-$(first_executable /bin/bash /usr/bin/bash)}"
+srun_bin="${srun_bin:-$(first_executable /usr/bin/srun /bin/srun "$(command_path_if_executable srun)" || true)}"
+scontrol_bin="${scontrol_bin:-$(first_executable /usr/bin/scontrol /bin/scontrol "$(command_path_if_executable scontrol)" || true)}"
 srun_gpu_args="${srun_gpu_args:-}"
 if [ -z "$srun_gpu_args" ] && [ -n "${SLURM_GPUS_PER_TASK:-}" ]; then
     srun_gpu_args="--gpus-per-task=$SLURM_GPUS_PER_TASK"
@@ -390,7 +411,7 @@ run_worker_method() {
 }
 
 run_methods_multi_node() {
-    if ! command -v srun >/dev/null 2>&1 || [ -z "${SLURM_JOB_NODELIST:-}" ]; then
+    if [ -z "$srun_bin" ] || [ -z "$scontrol_bin" ] || [ -z "${SLURM_JOB_NODELIST:-}" ]; then
         log_stage "No Slurm allocation detected; running selected methods sequentially"
         run_selected_methods_sequential
         return 0
@@ -405,11 +426,28 @@ run_methods_multi_node() {
         exit 1
     fi
 
+    if [ ! -x "$srun_bin" ]; then
+        echo "srun_bin is not executable: $srun_bin" >&2
+        echo "Set srun_bin=/absolute/path/to/srun if needed." >&2
+        exit 1
+    fi
+    if [ ! -x "$scontrol_bin" ]; then
+        echo "scontrol_bin is not executable: $scontrol_bin" >&2
+        echo "Set scontrol_bin=/absolute/path/to/scontrol if needed." >&2
+        exit 1
+    fi
+
     local nodes=()
-    while IFS= read -r node; do [ -n "$node" ] && nodes+=("$node"); done < <(scontrol show hostnames "$SLURM_JOB_NODELIST")
+    while IFS= read -r node; do [ -n "$node" ] && nodes+=("$node"); done < <("$scontrol_bin" show hostnames "$SLURM_JOB_NODELIST")
 
     if [ "${#nodes[@]}" -eq 0 ]; then
         echo "Could not resolve nodes from SLURM_JOB_NODELIST=$SLURM_JOB_NODELIST" >&2
+        exit 1
+    fi
+
+    if [ ! -x "$system_bash_bin" ]; then
+        echo "system_bash_bin is not executable: $system_bash_bin" >&2
+        echo "Set system_bash_bin=/absolute/path/to/bash if this cluster uses a nonstandard location." >&2
         exit 1
     fi
 
@@ -428,10 +466,13 @@ run_methods_multi_node() {
         local node="${nodes[$((method_index % ${#nodes[@]}))]}"
         local worker_log="$multi_node_log_dir/${method}.log"
         log_stage "Launching method=$method on node=$node log=$worker_log"
-        srun --nodes=1 --ntasks=1 --cpus-per-task="$slurm_cpus_per_task" $srun_gpu_args -w "$node" \
-            env multi_node_worker=1 worker_method="$method" multi_node=0 run_name="$run_name" \
-            python_bin="$python_bin" main_py="$main_py" PYTHONPATH="$PYTHONPATH" \
-            script_path="$script_path" bash "$script_path" \
+        "$srun_bin" --nodes=1 --ntasks=1 --cpus-per-task="$slurm_cpus_per_task" $srun_gpu_args -w "$node" \
+            "$system_bash_bin" -c 'source "$1/bin/activate" &&
+                export PYTHONPATH="$2"
+                export multi_node_worker=1 worker_method="$3" multi_node=0 run_name="$4"
+                export python_bin="$5" main_py="$6" script_path="$7"
+                exec "$8" "$7"' \
+            _ "$VENV" "$PYTHONPATH" "$method" "$run_name" "$python_bin" "$main_py" "$script_path" "$system_bash_bin" \
             > "$worker_log" 2>&1 &
         pids+=("$!")
         method_index=$((method_index + 1))
@@ -489,6 +530,10 @@ echo "Multi-node scheduler:    $multi_node"
 echo "Worker mode:             $multi_node_worker${worker_method:+ ($worker_method)}"
 echo "GPUs per worker task:    $gpus_per_task"
 echo "srun GPU args:           ${srun_gpu_args:-<none>}"
+echo "VENV:                   $VENV"
+echo "System bash binary:      $system_bash_bin"
+echo "srun binary:             ${srun_bin:-<not found>}"
+echo "scontrol binary:         ${scontrol_bin:-<not found>}"
 echo "WANDA save dir:         $wanda_save_dir"
 echo "Magnitude save dir:     $magnitude_save_dir"
 echo "SparseGPT save dir:     $sparsegpt_save_dir"
