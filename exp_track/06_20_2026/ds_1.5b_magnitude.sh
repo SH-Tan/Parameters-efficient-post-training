@@ -6,8 +6,8 @@
 #SBATCH --ntasks-per-node=1
 #SBATCH --cpus-per-task=72
 #SBATCH --time=08:00:00
-#SBATCH --output=slurm-%j_prune_1d5.out
-#SBATCH --error=slurm-%j_prune_1d5.err
+#SBATCH --output=slurm-%j_prune_1d5_magnitude.out
+#SBATCH --error=slurm-%j_prune_1d5_magnitude.err
 
 #
 # run_prune.sh
