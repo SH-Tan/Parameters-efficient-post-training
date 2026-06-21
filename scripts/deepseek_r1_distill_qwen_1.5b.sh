@@ -76,6 +76,30 @@ clear_results="${clear_results:-1}"
 # plot_only=1 -> skip all pruning/eval, just regenerate plots for a run.
 plot_only="${plot_only:-0}"
 
+chosen_method_suffix() {
+    local methods=()
+    [ "$run_wanda" = "1" ] && methods+=(wanda)
+    [ "$run_magnitude" = "1" ] && methods+=(magnitude)
+    [ "$run_sparsegpt" = "1" ] && methods+=(sparsegpt)
+    [ "$run_random" = "1" ] && methods+=(random)
+    if [ "${#methods[@]}" -eq 0 ]; then
+        echo "no_methods"
+    else
+        local IFS="_"
+        echo "${methods[*]}"
+    fi
+}
+
+default_run_name() {
+    local methods
+    methods="$(chosen_method_suffix)"
+    if [ -n "${SLURM_JOB_ID:-}" ]; then
+        echo "${SLURM_JOB_ID}_${methods}"
+    else
+        echo "$(date +%Y%m%d_%H%M%S)_${methods}"
+    fi
+}
+
 if [ "$plot_only" = "1" ] && [ -z "${run_name:-}" ]; then
     # No run_name given while plot-only -> use the most recently created run dir.
     latest_run_root="$(ls -1dt "$output_root"/*/ 2>/dev/null | head -n 1 || true)"
@@ -85,7 +109,7 @@ if [ "$plot_only" = "1" ] && [ -z "${run_name:-}" ]; then
     fi
     run_name="$(basename "$latest_run_root")"
 else
-    run_name="${run_name:-$(date +%Y%m%d_%H%M%S)}"
+    run_name="${run_name:-$(default_run_name)}"
 fi
 
 run_dir="$output_root/$run_name"
@@ -114,6 +138,7 @@ sparsegpt_calib_forward_batch_size="${sparsegpt_calib_forward_batch_size:-128}"
 sparsegpt_hessian_chunk_size="${sparsegpt_hessian_chunk_size:-2048}"
 
 model_device="${model_device:-auto_free}"
+model_dtype="${model_dtype:-auto}"
 
 # -----------------------------------------------------------------------------
 # 5. Downstream eval parameters
@@ -275,6 +300,7 @@ run_method() {
         --nsamples "$nsamples" \
         --seed "$seed" \
         --model_device "$model_device" \
+        --model_dtype "$model_dtype" \
         --calib_forward_batch_size "$method_calib_batch_size" \
         --sparsegpt_hessian_chunk_size "$sparsegpt_hessian_chunk_size" \
         --seqlen "$seq_len" \
@@ -329,6 +355,8 @@ echo "PPL eval data:          $pp_eval_data"
 echo "Prune ops:              ${prune_ops:-all}"
 echo "Downstream eval enabled: $run_downstream_eval"
 echo "Downstream backend:      $downstream_backend"
+echo "Model device:           $model_device"
+echo "Model dtype:            $model_dtype"
 echo "WANDA save dir:         $wanda_save_dir"
 echo "Magnitude save dir:     $magnitude_save_dir"
 echo "SparseGPT save dir:     $sparsegpt_save_dir"

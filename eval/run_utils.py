@@ -26,6 +26,13 @@ from prune.score_prune_utils import prune_by_scores
 from utils.model_utils import get_llm, get_tokenizer, resolve_model_device
 
 
+CONFIG_DTYPE_NAMES = {
+    torch.bfloat16: "bfloat16",
+    torch.float16: "float16",
+    torch.float32: "float32",
+}
+
+
 def log_stage(message):
     print(f"\n[stage] {message}", flush=True)
 
@@ -97,7 +104,11 @@ def save_pruned_checkpoint_if_needed(args, model, tokenizer, out_dir, score_orde
         raise ValueError("downstream_backend='vllm' cannot share the live Transformers model with PP eval in one pass; set run_pp_eval=0 or use downstream_backend=transformers")
     path = pruned_model_dir(args, out_dir, score_order, target_sparsity)
     os.makedirs(path, exist_ok=True)
-    log_stage(f"Saving pruned model checkpoint for downstream eval: {path}")
+    model_dtype = next(model.parameters()).dtype
+    config_dtype = CONFIG_DTYPE_NAMES.get(model_dtype)
+    if config_dtype is not None:
+        model.config.torch_dtype = config_dtype
+    log_stage(f"Saving pruned model checkpoint for downstream eval: {path} dtype={model_dtype}")
     model.save_pretrained(path, safe_serialization=True)
     tokenizer.save_pretrained(path)
     return path
@@ -340,7 +351,7 @@ def run_score_eval(args, score_dir):
     if args.prune_method == "random":
         print("Skipping score computation for random pruning.")
     else:
-        model = get_llm(args.model, args.cache_dir, model_device, args.seqlen)
+        model = get_llm(args.model, args.cache_dir, model_device, args.seqlen, args.model_dtype)
         model.eval()
         score_source = compute_scores(args, model, tokenizer, model_device, score_dir)
         reusable_model = model
@@ -399,7 +410,7 @@ def run_score_eval(args, score_dir):
             if args.prune_method == "random":
                 for target_sparsity in sparsity_ratios:
                     current_model_device = resolve_model_device(args.model_device)
-                    current_model = get_llm(args.model, args.cache_dir, current_model_device, args.seqlen)
+                    current_model = get_llm(args.model, args.cache_dir, current_model_device, args.seqlen, args.model_dtype)
                     try:
                         current_model.eval()
                         progress.set_postfix(score_order=score_order, sparsity=f"{target_sparsity:.4f}")
@@ -460,7 +471,7 @@ def run_score_eval(args, score_dir):
                     if current_model is None:
                         log_stage(f"Loading model for score_order={score_order}")
                         if reusable_model is None:
-                            current_model = get_llm(args.model, args.cache_dir, current_model_device, args.seqlen)
+                            current_model = get_llm(args.model, args.cache_dir, current_model_device, args.seqlen, args.model_dtype)
                         else:
                             current_model = reusable_model
                             reusable_model = None

@@ -168,6 +168,30 @@ keep_worker_log="${keep_worker_log:-1}"
 # plot_only=1 -> skip all pruning/eval, just regenerate plots for a run.
 plot_only="${plot_only:-0}"
 
+chosen_method_suffix() {
+    local methods=()
+    [ "$run_wanda" = "1" ] && methods+=(wanda)
+    [ "$run_magnitude" = "1" ] && methods+=(magnitude)
+    [ "$run_sparsegpt" = "1" ] && methods+=(sparsegpt)
+    [ "$run_random" = "1" ] && methods+=(random)
+    if [ "${#methods[@]}" -eq 0 ]; then
+        echo "no_methods"
+    else
+        local IFS="_"
+        echo "${methods[*]}"
+    fi
+}
+
+default_run_name() {
+    local methods
+    methods="$(chosen_method_suffix)"
+    if [ -n "${SLURM_JOB_ID:-}" ]; then
+        echo "${SLURM_JOB_ID}_${methods}"
+    else
+        echo "$(date +%Y%m%d_%H%M%S)_${methods}"
+    fi
+}
+
 if [ "$plot_only" = "1" ] && [ -z "${run_name:-}" ]; then
     # No run_name given while plot-only -> use the most recently created run dir.
     latest_run_root="$(ls -1dt "$output_root"/*/ 2>/dev/null | head -n 1 || true)"
@@ -177,7 +201,7 @@ if [ "$plot_only" = "1" ] && [ -z "${run_name:-}" ]; then
     fi
     run_name="$(basename "$latest_run_root")"
 else
-    run_name="${run_name:-$(date +%Y%m%d_%H%M%S)}"
+    run_name="${run_name:-$(default_run_name)}"
 fi
 
 run_dir="$output_root/$run_name"
@@ -208,6 +232,7 @@ sparsegpt_hessian_chunk_size="${sparsegpt_hessian_chunk_size:-2048}"
 sparsegpt_percdamp="${sparsegpt_percdamp:-0.01}"
 
 model_device="${model_device:-auto_free}"
+model_dtype="${model_dtype:-auto}"
 
 # -----------------------------------------------------------------------------
 # 5. Downstream eval parameters
@@ -376,6 +401,7 @@ run_method() {
         --nsamples "$nsamples"
         --seed "$seed"
         --model_device "$model_device"
+        --model_dtype "$model_dtype"
         --calib_forward_batch_size "$method_calib_batch_size"
         --sparsegpt_hessian_chunk_size "$sparsegpt_hessian_chunk_size"
         --sparsegpt_percdamp "$sparsegpt_percdamp"
@@ -497,8 +523,9 @@ run_methods_multi_node() {
                     export VLLM_WORKER_MULTIPROC_METHOD=spawn VLLM_USE_V1=1 VLLM_NO_USAGE_STATS=1
                     export multi_node_worker=1 worker_method="$3" multi_node=0 run_name="$4"
                     export python_bin="$5" main_py="$6" script_path="$7"
+                    export model_dtype="$9" vllm_dtype="${10}"
                     exec "$8" "$7"' \
-                _ "$VENV" "$PYTHONPATH" "$method" "$run_name" "$python_bin" "$main_py" "$script_path" "$system_bash_bin" \
+                _ "$VENV" "$PYTHONPATH" "$method" "$run_name" "$python_bin" "$main_py" "$script_path" "$system_bash_bin" "$model_dtype" "$vllm_dtype" \
                 2>&1 | tee "$worker_log" &
         else
             "$srun_bin" --nodes=1 --ntasks=1 --cpus-per-task="$slurm_cpus_per_task" $srun_gpu_args -w "$node" \
@@ -507,8 +534,9 @@ run_methods_multi_node() {
                     export VLLM_WORKER_MULTIPROC_METHOD=spawn VLLM_USE_V1=1 VLLM_NO_USAGE_STATS=1
                     export multi_node_worker=1 worker_method="$3" multi_node=0 run_name="$4"
                     export python_bin="$5" main_py="$6" script_path="$7"
+                    export model_dtype="$9" vllm_dtype="${10}"
                     exec "$8" "$7"' \
-                _ "$VENV" "$PYTHONPATH" "$method" "$run_name" "$python_bin" "$main_py" "$script_path" "$system_bash_bin" &
+                _ "$VENV" "$PYTHONPATH" "$method" "$run_name" "$python_bin" "$main_py" "$script_path" "$system_bash_bin" "$model_dtype" "$vllm_dtype" &
         fi
         pids+=("$!")
         method_index=$((method_index + 1))
@@ -562,6 +590,8 @@ echo "PPL eval data:          $pp_eval_data"
 echo "Prune ops:              ${prune_ops:-all}"
 echo "Downstream eval enabled: $run_downstream_eval"
 echo "Downstream backend:      $downstream_backend"
+echo "Model device:           $model_device"
+echo "Model dtype:            $model_dtype"
 echo "Multi-node scheduler:    $multi_node"
 echo "Worker mode:             $multi_node_worker${worker_method:+ ($worker_method)}"
 echo "GPUs per worker task:    $gpus_per_task"

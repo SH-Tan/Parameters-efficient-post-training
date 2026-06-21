@@ -14,7 +14,7 @@ def compute_magnitude_scores(model, save_dir=None, prune_ops=None):
         layer_scores = {}
         for name, module in subset.items():
             print(f"collecting magnitude scores layer {layer_idx} name {name}")
-            layer_scores[name] = module.weight.detach().abs().cpu()
+            layer_scores[name] = module.weight.detach().float().abs().cpu()
 
         save_path = save_layer_scores_pkl(
             layer_idx,

@@ -60,6 +60,12 @@ def add_common_prune_args(parser, require_model=True, default_model=None, model_
         help="Device map for model load. Use auto_free to pick the GPU with most free memory.",
     )
     parser.add_argument(
+        "--model_dtype",
+        type=str,
+        default="auto",
+        help="Model load dtype: auto reads local config torch_dtype when available; or use bf16, fp16, fp32.",
+    )
+    parser.add_argument(
         "--calib_data",
         type=str,
         default="c4",
