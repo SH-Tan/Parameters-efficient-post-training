@@ -79,6 +79,13 @@ export VLLM_USE_V1="${VLLM_USE_V1:-1}"
 export VLLM_NO_USAGE_STATS="${VLLM_NO_USAGE_STATS:-1}"
 export VLLM_WORKER_MULTIPROC_METHOD="${VLLM_WORKER_MULTIPROC_METHOD:-spawn}"
 
+scratch_root="${SCRATCH:-/tmp/${USER:-$(id -un)}}"
+export HF_HOME="${HF_HOME:-$scratch_root/.cache/huggingface}"
+export HF_DATASETS_CACHE="${HF_DATASETS_CACHE:-$scratch_root/.cache/huggingface/datasets}"
+export HF_HUB_CACHE="${HF_HUB_CACHE:-$scratch_root/.cache/huggingface/hub}"
+export XDG_CACHE_HOME="${XDG_CACHE_HOME:-$scratch_root/.cache}"
+mkdir -p "$HF_HOME" "$HF_DATASETS_CACHE" "$HF_HUB_CACHE" "$XDG_CACHE_HOME"
+
 export MPLCONFIGDIR="${MPLCONFIGDIR:-/tmp/matplotlib-${USER:-$(id -un)}}"
 export PYTORCH_CUDA_ALLOC_CONF="${PYTORCH_CUDA_ALLOC_CONF:-expandable_segments:True}"
 mkdir -p "$MPLCONFIGDIR"
@@ -231,7 +238,6 @@ downstream_top_p="${downstream_top_p:-1.0}"
 downstream_top_k="${downstream_top_k:-0}"
 downstream_response_log_max="${downstream_response_log_max:-50}"
 save_pruned_model="${save_pruned_model:-0}"
-scratch_root="${SCRATCH:-/tmp/${USER:-$(id -un)}}"
 pruned_model_root="${pruned_model_root:-$scratch_root/pruned_checkpoints/deepseek_r1_distill_qwen_1.5b/$run_name}"
 
 # -----------------------------------------------------------------------------
@@ -559,6 +565,9 @@ echo "Worker mode:             $multi_node_worker${worker_method:+ ($worker_meth
 echo "GPUs per worker task:    $gpus_per_task"
 echo "srun GPU args:           ${srun_gpu_args:-<none>}"
 echo "VENV:                   $VENV"
+echo "HF home:                $HF_HOME"
+echo "HF datasets cache:      $HF_DATASETS_CACHE"
+echo "HF hub cache:           $HF_HUB_CACHE"
 echo "System bash binary:      $system_bash_bin"
 echo "srun binary:             ${srun_bin:-<not found>}"
 echo "scontrol binary:         ${scontrol_bin:-<not found>}"
@@ -575,8 +584,8 @@ if [ "$plot_only" = "1" ]; then
     draw_plots
 else
     log_stage "Starting pruning/evaluation run $run_name"
-    log_stage "Enabled methods: $(enabled_plot_methods | tr '\n' ' ')"
     if [ "$multi_node_worker" = "1" ]; then
+        log_stage "Worker method: $worker_method"
         run_worker_method
     elif [ "$multi_node" = "1" ]; then
         run_methods_multi_node
