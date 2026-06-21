@@ -43,9 +43,26 @@ if [ "$python_bin" = "python" ] && [ -x "$conda_python" ]; then
     python_bin="$conda_python"
 fi
 
-script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-repo_root="$(cd "$script_dir/.." && pwd)"
+submit_dir="${SLURM_SUBMIT_DIR:-$PWD}"
+if [ -f "$submit_dir/main.py" ] && [ -d "$submit_dir/scripts" ]; then
+    repo_root="$(cd "$submit_dir" && pwd)"
+else
+    script_dir_probe="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+    repo_root="$(cd "$script_dir_probe/.." && pwd)"
+fi
+script_name="deepseek_r1_distill_qwen_1.5b_multi_node.sh"
+script_path="${script_path:-$repo_root/scripts/$script_name}"
 main_py="${main_py:-$repo_root/main.py}"
+if [ ! -f "$main_py" ] || [ ! -f "$script_path" ]; then
+    echo "Could not resolve repository paths." >&2
+    echo "  SLURM_SUBMIT_DIR=${SLURM_SUBMIT_DIR:-<unset>}" >&2
+    echo "  PWD=$PWD" >&2
+    echo "  repo_root=$repo_root" >&2
+    echo "  main_py=$main_py" >&2
+    echo "  script_path=$script_path" >&2
+    echo "Submit this script from the repository root, or set script_path=/absolute/path/to/$script_name." >&2
+    exit 1
+fi
 
 if command -v module >/dev/null 2>&1; then
     module reset || true
@@ -414,7 +431,7 @@ run_methods_multi_node() {
         srun --nodes=1 --ntasks=1 --cpus-per-task="$slurm_cpus_per_task" $srun_gpu_args -w "$node" \
             env multi_node_worker=1 worker_method="$method" multi_node=0 run_name="$run_name" \
             python_bin="$python_bin" main_py="$main_py" PYTHONPATH="$PYTHONPATH" \
-            bash "$BASH_SOURCE" \
+            script_path="$script_path" bash "$script_path" \
             > "$worker_log" 2>&1 &
         pids+=("$!")
         method_index=$((method_index + 1))
@@ -459,6 +476,9 @@ draw_plots() {
 
 [ "$plot_only" != "1" ] && mkdir -p "$run_dir"
 
+echo "Submit dir:             $submit_dir"
+echo "Repo root:              $repo_root"
+echo "Script path:            $script_path"
 echo "Run output root:        $run_dir"
 echo "Calibration data:       $calib_data"
 echo "PPL eval data:          $pp_eval_data"
