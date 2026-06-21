@@ -149,6 +149,7 @@ def run_vllm_downstream_eval_subprocess(args, pruned_model_path, response_log_pa
         "--dtype",
         str(args.vllm_dtype),
     ]
+    cmd.append("--enforce_eager" if args.vllm_enforce_eager else "--no_enforce_eager")
     if args.downstream_response_key:
         cmd.extend(["--response_key", str(args.downstream_response_key)])
     if args.downstream_reward_score_dir:
@@ -206,6 +207,7 @@ def run_downstream_eval(args, model, tokenizer, model_device, out_dir, score_ord
         tensor_parallel_size=args.vllm_tensor_parallel_size,
         gpu_memory_utilization=args.vllm_gpu_memory_utilization,
         dtype=args.vllm_dtype,
+        enforce_eager=args.vllm_enforce_eager,
     )
     if args.downstream_backend == "vllm":
         metrics_path = os.path.join(

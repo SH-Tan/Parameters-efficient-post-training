@@ -224,6 +224,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--tensor_parallel_size", type=int, default=1)
     parser.add_argument("--gpu_memory_utilization", type=float, default=0.9)
     parser.add_argument("--dtype", default="auto")
+    parser.add_argument("--enforce_eager", action=argparse.BooleanOptionalAction, default=True)
     return parser.parse_args()
 
 
@@ -301,7 +302,7 @@ def main() -> None:
         dtype=str(args.dtype),
         max_model_len=int(args.max_prompt_length) + int(args.max_new_tokens),
         trust_remote_code=True,
-        enforce_eager=True,
+        enforce_eager=bool(args.enforce_eager),
     )
     sampling_params = _sampling_params(args)
     output_path = Path(args.output_path).expanduser()

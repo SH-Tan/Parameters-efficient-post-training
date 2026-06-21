@@ -5,7 +5,7 @@
 #SBATCH --nodes=1
 #SBATCH --ntasks-per-node=1
 #SBATCH --cpus-per-task=72
-#SBATCH --time=00:20:00
+#SBATCH --time=08:00:00
 #SBATCH --output=slurm-%j_prune_1d5.out
 #SBATCH --error=slurm-%j_prune_1d5.err
 
@@ -144,9 +144,9 @@ worker_method="${worker_method:-}"
 # 3. Which stages to run
 # -----------------------------------------------------------------------------
 
-run_magnitude="${run_magnitude:-1}"
+run_magnitude="${run_magnitude:-0}"
 run_sparsegpt="${run_sparsegpt:-0}"
-run_wanda="${run_wanda:-0}"
+run_wanda="${run_wanda:-1}"
 run_random="${run_random:-0}"
 
 run_pp_eval="${run_pp_eval:-0}"
@@ -188,7 +188,7 @@ seed="${seed:-42}"
 seq_len="${seq_len:-8192}"
 pp_seqlen="${pp_seqlen:-8192}"
 
-sparsity_ratios="${sparsity_ratios:-0 0.1 0.2 0.3 0.4 0.5}"
+sparsity_ratios="${sparsity_ratios:-0 0.1 0.2 0.3 0.4 0.5 0.6 0.7 0.8 0.9}"
 score_orders="${score_orders:-per_op local global}"
 prune_ops="${prune_ops:-}"          # empty = all ops
 
@@ -223,7 +223,7 @@ downstream_batch_size="${downstream_batch_size:-32}"
 downstream_generation_max_batch_tokens="${downstream_generation_max_batch_tokens:-32768}"
 downstream_use_cache="${downstream_use_cache:-1}"
 downstream_max_prompt_length="${downstream_max_prompt_length:-2048}"
-downstream_max_new_tokens="${downstream_max_new_tokens:-8192}"
+downstream_max_new_tokens="${downstream_max_new_tokens:-2048}"
 downstream_temperature="${downstream_temperature:-0.0}"
 downstream_top_p="${downstream_top_p:-1.0}"
 downstream_top_k="${downstream_top_k:-0}"

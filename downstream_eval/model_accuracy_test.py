@@ -55,6 +55,7 @@ class DownstreamEvalConfig:
     tensor_parallel_size: int = 1
     gpu_memory_utilization: float = 0.9
     dtype: str = "auto"
+    enforce_eager: bool = True
 
 
 def resolve_dtype(name: str) -> torch.dtype:
@@ -548,7 +549,7 @@ def evaluate_vllm_task_accuracy(
         dtype=str(getattr(args, "dtype", "auto")),
         max_model_len=int(args.max_prompt_length) + int(args.max_new_tokens),
         trust_remote_code=True,
-        enforce_eager=True,
+        enforce_eager=bool(getattr(args, "enforce_eager", True)),
     )
     sampling_params = SamplingParams(**_sampling_kwargs(args))
     response_log_max = int(getattr(args, "response_log_max", -1))
