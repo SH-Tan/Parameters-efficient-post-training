@@ -224,7 +224,10 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--tensor_parallel_size", type=int, default=1)
     parser.add_argument("--gpu_memory_utilization", type=float, default=0.9)
     parser.add_argument("--dtype", default="auto")
-    parser.add_argument("--enforce_eager", action=argparse.BooleanOptionalAction, default=True)
+    eager_group = parser.add_mutually_exclusive_group()
+    eager_group.add_argument("--enforce_eager", "--enforce-eager", dest="enforce_eager", action="store_true")
+    eager_group.add_argument("--no_enforce_eager", "--no-enforce_eager", "--no-enforce-eager", dest="enforce_eager", action="store_false")
+    parser.set_defaults(enforce_eager=True)
     return parser.parse_args()
 
 
