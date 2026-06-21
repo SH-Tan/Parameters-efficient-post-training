@@ -227,6 +227,7 @@ prune_ops="${prune_ops:-}"          # empty = all ops
 
 calib_forward_batch_size="${calib_forward_batch_size:-128}"
 wanda_calib_forward_batch_size="${wanda_calib_forward_batch_size:-128}"
+wanda_activation_chunk_size="${wanda_activation_chunk_size:-2048}"
 sparsegpt_calib_forward_batch_size="${sparsegpt_calib_forward_batch_size:-128}"
 sparsegpt_hessian_chunk_size="${sparsegpt_hessian_chunk_size:-2048}"
 sparsegpt_percdamp="${sparsegpt_percdamp:-0.01}"
@@ -403,6 +404,7 @@ run_method() {
         --model_device "$model_device"
         --model_dtype "$model_dtype"
         --calib_forward_batch_size "$method_calib_batch_size"
+        --wanda_activation_chunk_size "$wanda_activation_chunk_size"
         --sparsegpt_hessian_chunk_size "$sparsegpt_hessian_chunk_size"
         --sparsegpt_percdamp "$sparsegpt_percdamp"
         --seqlen "$seq_len"
@@ -523,9 +525,9 @@ run_methods_multi_node() {
                     export VLLM_WORKER_MULTIPROC_METHOD=spawn VLLM_USE_V1=1 VLLM_NO_USAGE_STATS=1
                     export multi_node_worker=1 worker_method="$3" multi_node=0 run_name="$4"
                     export python_bin="$5" main_py="$6" script_path="$7"
-                    export model_dtype="$9" vllm_dtype="${10}"
+                    export model_dtype="$9" vllm_dtype="${10}" wanda_activation_chunk_size="${11}"
                     exec "$8" "$7"' \
-                _ "$VENV" "$PYTHONPATH" "$method" "$run_name" "$python_bin" "$main_py" "$script_path" "$system_bash_bin" "$model_dtype" "$vllm_dtype" \
+                _ "$VENV" "$PYTHONPATH" "$method" "$run_name" "$python_bin" "$main_py" "$script_path" "$system_bash_bin" "$model_dtype" "$vllm_dtype" "$wanda_activation_chunk_size" \
                 2>&1 | tee "$worker_log" &
         else
             "$srun_bin" --nodes=1 --ntasks=1 --cpus-per-task="$slurm_cpus_per_task" $srun_gpu_args -w "$node" \
@@ -534,9 +536,9 @@ run_methods_multi_node() {
                     export VLLM_WORKER_MULTIPROC_METHOD=spawn VLLM_USE_V1=1 VLLM_NO_USAGE_STATS=1
                     export multi_node_worker=1 worker_method="$3" multi_node=0 run_name="$4"
                     export python_bin="$5" main_py="$6" script_path="$7"
-                    export model_dtype="$9" vllm_dtype="${10}"
+                    export model_dtype="$9" vllm_dtype="${10}" wanda_activation_chunk_size="${11}"
                     exec "$8" "$7"' \
-                _ "$VENV" "$PYTHONPATH" "$method" "$run_name" "$python_bin" "$main_py" "$script_path" "$system_bash_bin" "$model_dtype" "$vllm_dtype" &
+                _ "$VENV" "$PYTHONPATH" "$method" "$run_name" "$python_bin" "$main_py" "$script_path" "$system_bash_bin" "$model_dtype" "$vllm_dtype" "$wanda_activation_chunk_size" &
         fi
         pids+=("$!")
         method_index=$((method_index + 1))
@@ -592,6 +594,7 @@ echo "Downstream eval enabled: $run_downstream_eval"
 echo "Downstream backend:      $downstream_backend"
 echo "Model device:           $model_device"
 echo "Model dtype:            $model_dtype"
+echo "WANDA activation chunk: $wanda_activation_chunk_size"
 echo "Multi-node scheduler:    $multi_node"
 echo "Worker mode:             $multi_node_worker${worker_method:+ ($worker_method)}"
 echo "GPUs per worker task:    $gpus_per_task"

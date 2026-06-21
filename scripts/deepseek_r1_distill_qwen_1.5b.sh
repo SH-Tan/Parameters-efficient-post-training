@@ -134,6 +134,7 @@ prune_ops="${prune_ops:-}"          # empty = all ops
 
 calib_forward_batch_size="${calib_forward_batch_size:-128}"
 wanda_calib_forward_batch_size="${wanda_calib_forward_batch_size:-128}"
+wanda_activation_chunk_size="${wanda_activation_chunk_size:-2048}"
 sparsegpt_calib_forward_batch_size="${sparsegpt_calib_forward_batch_size:-128}"
 sparsegpt_hessian_chunk_size="${sparsegpt_hessian_chunk_size:-2048}"
 
@@ -302,6 +303,7 @@ run_method() {
         --model_device "$model_device" \
         --model_dtype "$model_dtype" \
         --calib_forward_batch_size "$method_calib_batch_size" \
+        --wanda_activation_chunk_size "$wanda_activation_chunk_size" \
         --sparsegpt_hessian_chunk_size "$sparsegpt_hessian_chunk_size" \
         --seqlen "$seq_len" \
         --pp_seqlen "$pp_seqlen" \
@@ -357,6 +359,7 @@ echo "Downstream eval enabled: $run_downstream_eval"
 echo "Downstream backend:      $downstream_backend"
 echo "Model device:           $model_device"
 echo "Model dtype:            $model_dtype"
+echo "WANDA activation chunk: $wanda_activation_chunk_size"
 echo "WANDA save dir:         $wanda_save_dir"
 echo "Magnitude save dir:     $magnitude_save_dir"
 echo "SparseGPT save dir:     $sparsegpt_save_dir"
