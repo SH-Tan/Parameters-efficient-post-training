@@ -2,7 +2,7 @@
 #SBATCH --job-name=prune_1d5
 #SBATCH --account=ASC24079
 #SBATCH --partition=gh
-#SBATCH --nodes=4
+#SBATCH --nodes=2
 #SBATCH --ntasks-per-node=1
 #SBATCH --cpus-per-task=72
 #SBATCH --time=08:00:00
