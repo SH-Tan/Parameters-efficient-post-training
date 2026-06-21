@@ -37,7 +37,9 @@ main_py="${main_py:-main.py}"
 
 export MPLCONFIGDIR="${MPLCONFIGDIR:-/tmp/matplotlib-${USER:-$(id -un)}}"
 export PYTORCH_CUDA_ALLOC_CONF="${PYTORCH_CUDA_ALLOC_CONF:-expandable_segments:True}"
-export CUDA_VISIBLE_DEVICES="${CUDA_VISIBLE_DEVICES:-1}"
+if [ -n "${CUDA_VISIBLE_DEVICES:-}" ]; then
+    export CUDA_VISIBLE_DEVICES
+fi
 mkdir -p "$MPLCONFIGDIR"
 
 log_stage() {
@@ -63,7 +65,7 @@ output_root="${output_root:-out/deepseek_r1_distill_qwen_1.5b}"
 # -----------------------------------------------------------------------------
 
 run_magnitude="${run_magnitude:-1}"
-run_sparsegpt="${run_sparsegpt:-0}"
+run_sparsegpt="${run_sparsegpt:-1}"
 run_wanda="${run_wanda:-1}"
 run_random="${run_random:-0}"
 
@@ -110,8 +112,8 @@ score_orders="${score_orders:-per_op}"
 prune_ops="${prune_ops:-}"          # empty = all ops
 
 calib_forward_batch_size="${calib_forward_batch_size:-128}"
-wanda_calib_forward_batch_size="${wanda_calib_forward_batch_size:-128}"
-sparsegpt_calib_forward_batch_size="${sparsegpt_calib_forward_batch_size:-128}"
+wanda_calib_forward_batch_size="${wanda_calib_forward_batch_size:-32}"
+sparsegpt_calib_forward_batch_size="${sparsegpt_calib_forward_batch_size:-32}"
 sparsegpt_hessian_chunk_size="${sparsegpt_hessian_chunk_size:-2048}"
 
 model_device="${model_device:-auto_free}"

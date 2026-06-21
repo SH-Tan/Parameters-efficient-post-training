@@ -23,7 +23,7 @@ from prune.prune_random import prune_random
 from prune.prune_sparsegpt import compute_sparsegpt_scores
 from prune.prune_wanda import compute_wanda_scores
 from prune.score_prune_utils import prune_by_scores
-from utils.model_utils import get_llm, get_tokenizer, resolve_model_device
+from utils.model_utils import cuda_visible_devices_for_device, get_llm, get_tokenizer, resolve_model_device
 
 
 def log_stage(message):
@@ -103,7 +103,7 @@ def save_pruned_checkpoint_if_needed(args, model, tokenizer, out_dir, score_orde
     return path
 
 
-def run_vllm_downstream_eval_subprocess(args, pruned_model_path, response_log_path, metrics_path):
+def run_vllm_downstream_eval_subprocess(args, pruned_model_path, response_log_path, metrics_path, model_device):
     if pruned_model_path is None:
         raise ValueError("vLLM downstream eval requires a saved pruned model checkpoint")
     vllm_python = args.vllm_python or os.environ.get("VLLM_PYTHON") or "python"
@@ -158,7 +158,14 @@ def run_vllm_downstream_eval_subprocess(args, pruned_model_path, response_log_pa
         cmd.append("--shuffle")
     log_stage("Starting vLLM subprocess for downstream generation")
     print("vLLM command:", " ".join(cmd), flush=True)
-    subprocess.run(cmd, check=True)
+    env = None
+    if int(args.vllm_tensor_parallel_size) == 1:
+        visible_device = cuda_visible_devices_for_device(model_device)
+        if visible_device is not None:
+            env = os.environ.copy()
+            env["CUDA_VISIBLE_DEVICES"] = visible_device
+            print(f"vLLM CUDA_VISIBLE_DEVICES={visible_device}", flush=True)
+    subprocess.run(cmd, check=True, env=env)
     with open(metrics_path, encoding="utf-8") as handle:
         return json.load(handle)
 
@@ -208,6 +215,7 @@ def run_downstream_eval(args, model, tokenizer, model_device, out_dir, score_ord
             pruned_model_path,
             response_log_path,
             metrics_path,
+            model_device,
         )
     else:
         metrics = evaluate_downstream_task_accuracy(
