@@ -3,6 +3,8 @@ from __future__ import annotations
 import argparse
 import importlib.util
 import json
+import multiprocessing as mp
+import os
 import random
 import re
 from dataclasses import dataclass
@@ -262,7 +264,18 @@ def _sampling_params(args: argparse.Namespace):
     return SamplingParams(**kwargs)
 
 
+def configure_cuda_multiprocessing() -> None:
+    os.environ.setdefault("VLLM_WORKER_MULTIPROC_METHOD", "spawn")
+    os.environ.setdefault("VLLM_USE_V1", "1")
+    os.environ.setdefault("VLLM_NO_USAGE_STATS", "1")
+    try:
+        mp.set_start_method("spawn", force=True)
+    except RuntimeError:
+        pass
+
+
 def main() -> None:
+    configure_cuda_multiprocessing()
     args = parse_args()
     tokenizer = AutoTokenizer.from_pretrained(args.model_path, use_fast=False)
     if tokenizer.pad_token_id is None:

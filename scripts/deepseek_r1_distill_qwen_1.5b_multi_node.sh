@@ -77,6 +77,7 @@ export PYTHONUNBUFFERED="${PYTHONUNBUFFERED:-1}"
 export TOKENIZERS_PARALLELISM="${TOKENIZERS_PARALLELISM:-true}"
 export VLLM_USE_V1="${VLLM_USE_V1:-1}"
 export VLLM_NO_USAGE_STATS="${VLLM_NO_USAGE_STATS:-1}"
+export VLLM_WORKER_MULTIPROC_METHOD="${VLLM_WORKER_MULTIPROC_METHOD:-spawn}"
 
 export MPLCONFIGDIR="${MPLCONFIGDIR:-/tmp/matplotlib-${USER:-$(id -un)}}"
 export PYTORCH_CUDA_ALLOC_CONF="${PYTORCH_CUDA_ALLOC_CONF:-expandable_segments:True}"
@@ -105,7 +106,7 @@ command_path_if_executable() {
 # 2. Model / data / output locations
 # -----------------------------------------------------------------------------
 
-model="${model:-/work2/09576/shuozhe/saved_model/Qwen2.5-0.5B}"
+model="${model:-/work2/09576/shuozhe/saved_model/DeepSeek-R1-Distill-Qwen-1.5B}"
 cache_dir="${cache_dir:-llm_weights}"
 calib_data="${calib_data:-$repo_root/dataset/deepseek1.5b/dsk_1d5_8192.parquet}"
 pp_eval_data="${pp_eval_data:-wikitext2}"
@@ -469,6 +470,7 @@ run_methods_multi_node() {
         "$srun_bin" --nodes=1 --ntasks=1 --cpus-per-task="$slurm_cpus_per_task" $srun_gpu_args -w "$node" \
             "$system_bash_bin" -c 'source "$1/bin/activate" &&
                 export PYTHONPATH="$2"
+                export VLLM_WORKER_MULTIPROC_METHOD=spawn VLLM_USE_V1=1 VLLM_NO_USAGE_STATS=1
                 export multi_node_worker=1 worker_method="$3" multi_node=0 run_name="$4"
                 export python_bin="$5" main_py="$6" script_path="$7"
                 exec "$8" "$7"' \

@@ -157,7 +157,17 @@ def run_vllm_downstream_eval_subprocess(args, pruned_model_path, response_log_pa
         cmd.append("--shuffle")
     log_stage("Starting vLLM subprocess for downstream generation")
     print("vLLM command:", " ".join(cmd), flush=True)
-    subprocess.run(cmd, check=True)
+    env = os.environ.copy()
+    env.setdefault("VLLM_WORKER_MULTIPROC_METHOD", "spawn")
+    env.setdefault("VLLM_USE_V1", "1")
+    env.setdefault("VLLM_NO_USAGE_STATS", "1")
+    print(
+        "vLLM env: "
+        f"VLLM_WORKER_MULTIPROC_METHOD={env.get('VLLM_WORKER_MULTIPROC_METHOD')} "
+        f"VLLM_USE_V1={env.get('VLLM_USE_V1')}",
+        flush=True,
+    )
+    subprocess.run(cmd, check=True, env=env)
     with open(metrics_path, encoding="utf-8") as handle:
         return json.load(handle)
 
