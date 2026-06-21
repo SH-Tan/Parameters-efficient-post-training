@@ -205,6 +205,7 @@ calib_forward_batch_size="${calib_forward_batch_size:-128}"
 wanda_calib_forward_batch_size="${wanda_calib_forward_batch_size:-128}"
 sparsegpt_calib_forward_batch_size="${sparsegpt_calib_forward_batch_size:-128}"
 sparsegpt_hessian_chunk_size="${sparsegpt_hessian_chunk_size:-2048}"
+sparsegpt_percdamp="${sparsegpt_percdamp:-0.01}"
 
 model_device="${model_device:-auto_free}"
 
@@ -377,6 +378,7 @@ run_method() {
         --model_device "$model_device"
         --calib_forward_batch_size "$method_calib_batch_size"
         --sparsegpt_hessian_chunk_size "$sparsegpt_hessian_chunk_size"
+        --sparsegpt_percdamp "$sparsegpt_percdamp"
         --seqlen "$seq_len"
         --pp_seqlen "$pp_seqlen"
         --sparsity_ratio $sparsity_ratios
