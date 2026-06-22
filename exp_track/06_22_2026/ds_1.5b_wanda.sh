@@ -1,5 +1,5 @@
 #!/bin/bash
-#SBATCH --job-name=prune_1d5
+#SBATCH --job-name=wanda
 #SBATCH --account=ASC24079
 #SBATCH --partition=gh
 #SBATCH --nodes=2
