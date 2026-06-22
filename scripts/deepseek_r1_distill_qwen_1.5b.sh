@@ -64,9 +64,9 @@ output_root="${output_root:-out/deepseek_r1_distill_qwen_1.5b}"
 # 3. Which stages to run
 # -----------------------------------------------------------------------------
 
-run_magnitude="${run_magnitude:-1}"
+run_magnitude="${run_magnitude:-0}"
 run_sparsegpt="${run_sparsegpt:-1}"
-run_wanda="${run_wanda:-1}"
+run_wanda="${run_wanda:-0}"
 run_random="${run_random:-0}"
 
 run_pp_eval="${run_pp_eval:-0}"
@@ -123,14 +123,6 @@ model_device="${model_device:-auto_free}"
 # -----------------------------------------------------------------------------
 downstream_backend="${downstream_backend:-vllm}"
 vllm_tensor_parallel_size="${vllm_tensor_parallel_size:-1}"
-# if [ -z "${vllm_tensor_parallel_size:-}" ]; then
-#     if command -v nvidia-smi >/dev/null 2>&1; then
-#         vllm_tensor_parallel_size="$(nvidia-smi -L 2>/dev/null | wc -l | tr -d ' ')"
-#     else
-#         vllm_tensor_parallel_size="1"
-#     fi
-#     [ "${vllm_tensor_parallel_size:-0}" -ge 1 ] 2>/dev/null || vllm_tensor_parallel_size="1"
-# fi
 vllm_gpu_memory_utilization="${vllm_gpu_memory_utilization:-0.7}"
 vllm_dtype="${vllm_dtype:-auto}"
 vllm_python="${vllm_python:-}"

@@ -140,11 +140,6 @@ def _cuda_supports_bfloat16(device):
         return torch.cuda.is_bf16_supported()
 
 
-def _use_config_bfloat16(model_name, config):
-    name = str(model_name).lower()
-    return "deepseek" in name and _torch_dtype_from_config(config) is torch.bfloat16
-
-
 def resolve_model_dtype(model_name, cache_dir, device):
     try:
         config = AutoConfig.from_pretrained(model_name, cache_dir=cache_dir)
@@ -154,15 +149,13 @@ def resolve_model_dtype(model_name, cache_dir, device):
         enable_hf_offline_mode()
         config = AutoConfig.from_pretrained(model_name, cache_dir=cache_dir, local_files_only=True)
 
-    dtype = torch.bfloat16 if _use_config_bfloat16(model_name, config) else None
+    dtype = _torch_dtype_from_config(config)
     if dtype is torch.bfloat16 and str(device).startswith("cuda") and not _cuda_supports_bfloat16(device):
         print("Model config requests bfloat16 but selected CUDA device does not support BF16; using float16")
         return torch.float16
-    if dtype is not None:
+    if dtype is torch.bfloat16:
         return dtype
-    if str(device).startswith("cuda"):
-        return torch.float16
-    return "auto"
+    return torch.float16
 
 
 def get_llm(model_name, cache_dir="llm_weights", device="cpu", seqlen=1024):

@@ -16,6 +16,19 @@ class SparseGPT:
         self.nsamples = 0
         self.hessian_chunk_size = int(hessian_chunk_size)
 
+    def _damped_cholesky(self, hessian, damp, max_tries=6):
+        diag = torch.arange(self.columns, device=self.dev)
+        hessian[diag, diag] += damp
+        next_damp = damp
+        for attempt in range(max_tries):
+            chol, info = torch.linalg.cholesky_ex(hessian)
+            if int(info.max().item()) == 0:
+                return chol
+            next_damp = next_damp * 10
+            hessian[diag, diag] += next_damp
+            print(f"SparseGPT Hessian Cholesky retry {attempt + 1}: added damp={float(next_damp):.6g}")
+        return torch.linalg.cholesky(hessian)
+
     def _weight_2d(self):
         weight = self.layer.weight.data
         if isinstance(self.layer, nn.Conv2d):
@@ -53,9 +66,7 @@ class SparseGPT:
         weight[:, dead] = 0
 
         damp = percdamp * torch.mean(torch.diag(hessian))
-        diag = torch.arange(self.columns, device=self.dev)
-        hessian[diag, diag] += damp
-        hessian = torch.linalg.cholesky(hessian)
+        hessian = self._damped_cholesky(hessian, damp)
         hessian = torch.cholesky_inverse(hessian)
         hessian = torch.linalg.cholesky(hessian, upper=True)
 

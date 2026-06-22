@@ -2,7 +2,6 @@ import gc
 import json
 import os
 import subprocess
-import sys
 
 import torch
 from tqdm.auto import tqdm
