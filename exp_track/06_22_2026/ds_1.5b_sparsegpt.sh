@@ -2,7 +2,7 @@
 #SBATCH --job-name=sparsegpt
 #SBATCH --account=ASC24079
 #SBATCH --partition=gh
-#SBATCH --nodes=1
+#SBATCH --nodes=2
 #SBATCH --ntasks-per-node=1
 #SBATCH --cpus-per-task=72
 #SBATCH --time=08:00:00
