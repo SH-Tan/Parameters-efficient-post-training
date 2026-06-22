@@ -117,6 +117,30 @@ def _build_token_buffer_from_texts(texts, tokenizer, min_tokens):
     return torch.cat(chunks, dim=1)
 
 
+
+def _iter_local_parquet_rows(path):
+    try:
+        import pyarrow.parquet as pq
+
+        parquet_file = pq.ParquetFile(str(path))
+        for batch in parquet_file.iter_batches():
+            columns = batch.to_pydict()
+            if not columns:
+                continue
+            keys = list(columns)
+            num_rows = len(columns[keys[0]])
+            for row_idx in range(num_rows):
+                yield {key: columns[key][row_idx] for key in keys}
+        return
+    except ImportError:
+        pass
+
+    import pandas as pd
+
+    dataframe = pd.read_parquet(path)
+    for row in dataframe.to_dict(orient="records"):
+        yield row
+
 def _build_calibration_samples_from_token_ids(rows, ids_key, nsamples, seqlen, pad_token_id):
     trainloader = []
     for row in rows:
@@ -260,31 +284,22 @@ def get_actor_math_500_response(nsamples, seed, seqlen, tokenizer):
 
 
 def get_deepseek_1d5_8192_response(nsamples, seed, seqlen, tokenizer):
-    dataset = load_dataset(
-        "parquet",
-        data_files="dataset/deepseek1.5b/dsk_1d5_8192.parquet",
-        split="train",
-        streaming=True,
-    )
-    trainloader = _build_calibration_samples_from_token_ids(
-        dataset,
-        "prompt_generated_trajectory_ids",
-        nsamples,
-        seqlen,
-        _pad_token_id(tokenizer),
-    )
-    return trainloader, None
+    return get_token_id_parquet("dataset/deepseek1.5b/dsk_1d5_8192.parquet", nsamples, seed, seqlen, tokenizer)
 
 
 def get_token_id_parquet(path, nsamples, seed, seqlen, tokenizer):
-    dataset = load_dataset(
-        "parquet",
-        data_files=str(Path(path).expanduser()),
-        split="train",
-        streaming=True,
-    )
+    expanded_path = Path(path).expanduser()
+    if expanded_path.is_file():
+        rows = _iter_local_parquet_rows(expanded_path)
+    else:
+        rows = load_dataset(
+            "parquet",
+            data_files=str(expanded_path),
+            split="train",
+            streaming=True,
+        )
     trainloader = _build_calibration_samples_from_token_ids(
-        dataset,
+        rows,
         "prompt_generated_trajectory_ids",
         nsamples,
         seqlen,

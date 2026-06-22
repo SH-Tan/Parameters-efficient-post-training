@@ -49,7 +49,9 @@ def add_common_prune_args(parser, require_model=True, default_model=None, model_
     parser.add_argument("--cache_dir", default="llm_weights", type=str)
     parser.add_argument("--save", type=str, default="scores", help="Directory to save outputs.")
     parser.add_argument("--calib_forward_batch_size", type=int, default=1, help="WANDA/SparseGPT calibration forward microbatch size.")
+    parser.add_argument("--wanda_activation_chunk_size", type=int, default=2048, help="Rows per FP32 activation-norm chunk for WANDA score accumulation. Use smaller values to reduce peak GPU memory.")
     parser.add_argument("--sparsegpt_hessian_chunk_size", type=int, default=8192, help="Token chunk size for SparseGPT Hessian updates. Use <=0 to disable chunking.")
+    parser.add_argument("--sparsegpt_percdamp", type=float, default=0.01, help="SparseGPT Hessian diagonal damping as a fraction of mean Hessian diagonal.")
     parser.add_argument(
         "--model_device",
         type=str,

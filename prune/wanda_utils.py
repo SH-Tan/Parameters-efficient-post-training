@@ -2,10 +2,11 @@ import torch
 
 
 class WrappedGPT:
-    def __init__(self, layer):
+    def __init__(self, layer, activation_chunk_size=2048):
         self.columns = layer.weight.data.shape[1]
-        self.scaler_row = torch.zeros((self.columns), device=layer.weight.device)
+        self.scaler_row = torch.zeros((self.columns), device=layer.weight.device, dtype=torch.float32)
         self.nsamples = 0
+        self.activation_chunk_size = int(activation_chunk_size)
 
     def add_batch(self, inp, _):
         if inp.dim() == 2:
@@ -14,7 +15,14 @@ class WrappedGPT:
         batch_size = inp.shape[0]
         self.scaler_row *= self.nsamples / (self.nsamples + batch_size)
         self.nsamples += batch_size
-        self.scaler_row += torch.norm(inp, p=2, dim=0) ** 2 / self.nsamples
+
+        chunk_size = self.activation_chunk_size
+        if chunk_size <= 0:
+            chunk_size = inp.shape[0]
+        for start in range(0, inp.shape[0], chunk_size):
+            inp_chunk = inp[start:start + chunk_size].float()
+            self.scaler_row += inp_chunk.pow(2).sum(dim=0) / self.nsamples
+            del inp_chunk
 
 
 def layer_forward(model, layer, hidden_states, attention_mask, position_ids):

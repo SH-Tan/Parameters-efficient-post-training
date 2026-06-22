@@ -40,7 +40,13 @@ def compute_wanda_scores(args, model, tokenizer, device=torch.device("cuda:0"), 
             if hasattr(model, "hf_device_map") and (f"model.layers.{layer_idx}" in model.hf_device_map):
                 dev = as_device(model.hf_device_map[f"model.layers.{layer_idx}"])
 
-            wrapped_layers = {name: WrappedGPT(module) for name, module in subset.items()}
+            wrapped_layers = {
+                name: WrappedGPT(
+                    module,
+                    activation_chunk_size=getattr(args, "wanda_activation_chunk_size", 2048),
+                )
+                for name, module in subset.items()
+            }
 
             def add_batch(name):
                 def hook(_, inp, out):
@@ -88,9 +94,9 @@ def compute_wanda_scores(args, model, tokenizer, device=torch.device("cuda:0"), 
             layer_scores = {}
             for name, module in subset.items():
                 print(f"collecting WANDA scores layer {layer_idx} name {name}")
-                weight_cpu = module.weight.detach().cpu()
-                scaler_cpu = wrapped_layers[name].scaler_row.detach().cpu()
-                layer_scores[name] = torch.abs(weight_cpu) * torch.sqrt(scaler_cpu.reshape((1, -1)))
+                weight_cpu = module.weight.detach().float().cpu()
+                scaler_cpu = wrapped_layers[name].scaler_row.detach().float().cpu()
+                layer_scores[name] = weight_cpu.abs() * scaler_cpu.clamp_min(0).sqrt().reshape((1, -1))
                 del weight_cpu, scaler_cpu
 
             save_path = save_layer_scores_pkl(

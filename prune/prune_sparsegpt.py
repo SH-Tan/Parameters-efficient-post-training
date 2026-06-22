@@ -95,7 +95,9 @@ def compute_sparsegpt_scores(args, model, tokenizer, device=torch.device("cuda:0
             layer_scores = {}
             for name in subset:
                 print(f"collecting SparseGPT scores layer {layer_idx} name {name}")
-                layer_scores[name] = sparsegpt_layers[name].score(percdamp=0.01)
+                layer_scores[name] = sparsegpt_layers[name].score(
+                    percdamp=getattr(args, "sparsegpt_percdamp", 0.01),
+                )
                 sparsegpt_layers[name].free()
 
             save_path = save_layer_scores_pkl(
@@ -108,7 +110,7 @@ def compute_sparsegpt_scores(args, model, tokenizer, device=torch.device("cuda:0
                     "calib_data": args.calib_data,
                     "nsamples": args.nsamples,
                     "seqlen": model.seqlen,
-                    "percdamp": 0.01,
+                    "percdamp": getattr(args, "sparsegpt_percdamp", 0.01),
                 },
             )
             if save_path is not None:
