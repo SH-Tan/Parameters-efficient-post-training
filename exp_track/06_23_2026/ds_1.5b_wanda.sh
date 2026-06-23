@@ -115,7 +115,7 @@ command_path_if_executable() {
 
 model="${model:-/work2/09576/shuozhe/saved_model/DeepSeek-R1-Distill-Qwen-1.5B}"
 cache_dir="${cache_dir:-llm_weights}"
-calib_data="${calib_data:-dataset/deepseek1.5b/random_chars_8192.parquet}"
+calib_data="${calib_data:-dataset/random_chars_8192.parquet}"
 pp_eval_data="${pp_eval_data:-wikitext2}"
 downstream_task_data="${downstream_task_data:-/work2/09576/shuozhe/saved_dataset/MetaMathQA-math-500/test.parquet}"
 downstream_prompt_key="${downstream_prompt_key:-prompt}"
