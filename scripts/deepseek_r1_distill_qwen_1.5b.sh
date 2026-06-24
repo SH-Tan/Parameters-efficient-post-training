@@ -27,11 +27,7 @@ set -euo pipefail
 # 1. Python / environment
 # -----------------------------------------------------------------------------
 
-python_bin="${python_bin:-python}"
-conda_python="/home/tans5/anaconda3/envs/prune_llm/bin/python"
-if [ "$python_bin" = "python" ] && [ -x "$conda_python" ]; then
-    python_bin="$conda_python"
-fi
+python_bin="${python_bin:-${PYTHON_BIN:-$(command -v python)}}"
 
 main_py="${main_py:-main.py}"
 gpu_device="${gpu_device:-auto_free}"
@@ -155,7 +151,7 @@ sparsegpt_calib_forward_batch_size="${sparsegpt_calib_forward_batch_size:-128}"
 sparsegpt_hessian_chunk_size="${sparsegpt_hessian_chunk_size:-2048}"
 
 model_device="${model_device:-auto_free}"
-model_dtype="${model_dtype:-auto}"
+model_dtype="${model_dtype:-bf16}"
 
 # -----------------------------------------------------------------------------
 # 5. Downstream eval parameters
@@ -163,7 +159,7 @@ model_dtype="${model_dtype:-auto}"
 downstream_backend="${downstream_backend:-vllm}"
 vllm_tensor_parallel_size="${vllm_tensor_parallel_size:-1}"
 vllm_gpu_memory_utilization="${vllm_gpu_memory_utilization:-0.7}"
-vllm_dtype="${vllm_dtype:-auto}"
+vllm_dtype="${vllm_dtype:-bfloat16}"
 vllm_python="${vllm_python:-}"
 
 downstream_max_examples="${downstream_max_examples:-500}"
@@ -382,6 +378,7 @@ echo "PPL eval data:          $pp_eval_data"
 echo "Prune ops:              ${prune_ops:-all}"
 echo "Downstream eval enabled: $run_downstream_eval"
 echo "Downstream backend:      $downstream_backend"
+echo "vLLM Python:             ${vllm_python:-default current python}"
 echo "CUDA_VISIBLE_DEVICES:    ${CUDA_VISIBLE_DEVICES:-unset}"
 echo "GPU device selection:    $gpu_device"
 echo "Model device:           $model_device"

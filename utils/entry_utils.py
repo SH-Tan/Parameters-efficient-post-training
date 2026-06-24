@@ -116,6 +116,7 @@ def add_common_prune_args(parser, require_model=True, default_model=None, model_
     parser.add_argument("--vllm_tensor_parallel_size", type=int, default=1)
     parser.add_argument("--vllm_gpu_memory_utilization", type=float, default=0.9)
     parser.add_argument("--vllm_dtype", default="auto")
+    parser.add_argument("--vllm_python", default=None, help="Python executable for the vLLM downstream subprocess.")
     vllm_eager_group = parser.add_mutually_exclusive_group()
     vllm_eager_group.add_argument("--vllm_enforce_eager", "--vllm-enforce-eager", dest="vllm_enforce_eager", action="store_true")
     vllm_eager_group.add_argument("--no_vllm_enforce_eager", "--no-vllm_enforce_eager", "--no-vllm-enforce-eager", dest="vllm_enforce_eager", action="store_false")

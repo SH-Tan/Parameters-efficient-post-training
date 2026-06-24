@@ -117,8 +117,9 @@ def save_pruned_checkpoint_if_needed(args, model, tokenizer, out_dir, score_orde
 def run_vllm_downstream_eval_subprocess(args, pruned_model_path, response_log_path, metrics_path):
     if pruned_model_path is None:
         raise ValueError("vLLM downstream eval requires a saved pruned model checkpoint")
+    python_executable = args.vllm_python or sys.executable
     cmd = [
-        sys.executable,
+        python_executable,
         "-m",
         "downstream_eval.vllm_accuracy_runner",
         "--model_path",
