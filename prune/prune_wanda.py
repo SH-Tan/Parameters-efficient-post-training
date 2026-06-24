@@ -3,7 +3,13 @@ from tqdm.auto import tqdm
 
 from eval.data import get_loaders
 from prune import as_device, filter_prune_ops, find_layers, prepare_calibration_input
-from prune.wanda_utils import WrappedGPT, calibration_batch_tensor, layer_forward
+from prune.wanda_utils import (
+    WrappedGPT,
+    calibration_batch_tensor,
+    layer_forward,
+    save_wanda_activation_norm_stats,
+    wanda_activation_norm,
+)
 from utils.score_io_utils import save_layer_scores_pkl
 
 
@@ -85,19 +91,43 @@ def compute_wanda_scores(args, model, tokenizer, device=torch.device("cuda:0"), 
                             batch_attention_mask,
                             batch_position_ids,
                         )
-                        outs[batch_start:batch_end].copy_(batch_output.detach().cpu())
-                        del batch_input, batch_attention_mask, batch_position_ids, batch_output
+                        batch_output_cpu = batch_output.detach().cpu()
+                        del batch_output
+                        outs[batch_start:batch_end].copy_(batch_output_cpu)
+                        del batch_input, batch_attention_mask, batch_position_ids, batch_output_cpu
+                        if torch.cuda.is_available():
+                            torch.cuda.empty_cache()
             finally:
                 for handle in handles:
                     handle.remove()
 
             layer_scores = {}
+            activation_norms = {}
             for name, module in subset.items():
                 print(f"collecting WANDA scores layer {layer_idx} name {name}")
                 weight_cpu = module.weight.detach().float().cpu()
                 scaler_cpu = wrapped_layers[name].scaler_row.detach().float().cpu()
-                layer_scores[name] = weight_cpu.abs() * scaler_cpu.clamp_min(0).sqrt().reshape((1, -1))
-                del weight_cpu, scaler_cpu
+                activation_norm = wanda_activation_norm(scaler_cpu)
+                layer_scores[name] = weight_cpu.abs() * activation_norm.reshape((1, -1))
+                if getattr(args, "wanda_save_activation_stats", False):
+                    activation_norms[name] = activation_norm
+                del weight_cpu, scaler_cpu, activation_norm
+
+            if getattr(args, "wanda_save_activation_stats", False):
+                stats_dir = getattr(args, "wanda_activation_stats_dir", None) or save_dir or args.save
+                stats_path, plot_path = save_wanda_activation_norm_stats(
+                    layer_idx,
+                    activation_norms,
+                    stats_dir,
+                    bins=getattr(args, "wanda_activation_stats_bins", 256),
+                    metadata={
+                        "calib_data": args.calib_data,
+                        "nsamples": args.nsamples,
+                        "seqlen": model.seqlen,
+                        "score_layout": "input_hidden",
+                    },
+                )
+                print(f"saved WANDA activation norm stats for layer {layer_idx} to {stats_path} and {plot_path}")
 
             save_path = save_layer_scores_pkl(
                 layer_idx,
@@ -119,7 +149,7 @@ def compute_wanda_scores(args, model, tokenizer, device=torch.device("cuda:0"), 
             else:
                 del layer_scores
             inps, outs = outs, inps
-            del wrapped_layers, handles
+            del wrapped_layers, handles, activation_norms
             if torch.cuda.is_available():
                 torch.cuda.empty_cache()
 

@@ -34,6 +34,8 @@ if [ "$python_bin" = "python" ] && [ -x "$conda_python" ]; then
 fi
 
 main_py="${main_py:-main.py}"
+gpu_device="${gpu_device:-auto_free}"
+respect_cuda_visible_devices="${respect_cuda_visible_devices:-0}"
 
 export MPLCONFIGDIR="${MPLCONFIGDIR:-/tmp/matplotlib-${USER:-$(id -un)}}"
 export PYTORCH_CUDA_ALLOC_CONF="${PYTORCH_CUDA_ALLOC_CONF:-expandable_segments:True}"
@@ -43,15 +45,50 @@ log_stage() {
     printf '\n[%s] %s\n' "$(date '+%Y-%m-%d %H:%M:%S')" "$*"
 }
 
+select_most_free_gpu() {
+    if [ "$gpu_device" != "auto_free" ]; then
+        export CUDA_VISIBLE_DEVICES="$gpu_device"
+        echo "Using requested CUDA_VISIBLE_DEVICES=$CUDA_VISIBLE_DEVICES"
+        return 0
+    fi
+    if [ -n "${CUDA_VISIBLE_DEVICES:-}" ] && [ "$respect_cuda_visible_devices" = "1" ]; then
+        export CUDA_VISIBLE_DEVICES
+        echo "Using preset CUDA_VISIBLE_DEVICES=$CUDA_VISIBLE_DEVICES"
+        return 0
+    fi
+    command -v nvidia-smi >/dev/null 2>&1 || return 0
+
+    local line idx free_mem best_idx="" best_free=-1
+    while IFS= read -r line; do
+        idx="${line%%,*}"
+        free_mem="${line##*,}"
+        idx="${idx//[[:space:]]/}"
+        free_mem="${free_mem//[[:space:]]/}"
+        [[ "$idx" =~ ^[0-9]+$ ]] || continue
+        [[ "$free_mem" =~ ^[0-9]+$ ]] || continue
+        if [ "$free_mem" -gt "$best_free" ]; then
+            best_idx="$idx"
+            best_free="$free_mem"
+        fi
+    done < <(nvidia-smi --query-gpu=index,memory.free --format=csv,noheader,nounits 2>/dev/null || true)
+
+    if [ -n "$best_idx" ]; then
+        export CUDA_VISIBLE_DEVICES="$best_idx"
+        echo "Selected CUDA_VISIBLE_DEVICES=$CUDA_VISIBLE_DEVICES with ${best_free} MiB free"
+    fi
+}
+
+select_most_free_gpu
+
 # -----------------------------------------------------------------------------
 # 2. Model / data / output locations
 # -----------------------------------------------------------------------------
 
-model="${model:-/data/shuozhe/saved_model/Qwen2.5-0.5B}"
+model="${model:-deepseek-ai/DeepSeek-R1-Distill-Qwen-1.5B}"
 cache_dir="${cache_dir:-llm_weights}"
-calib_data="${calib_data:-/data/shuozhe/Parameters-efficient-post-training/dataset/deepseek1.5b/dsk_1d5_8192.parquet}"
+calib_data="${calib_data:-dataset/random_chars_8192.parquet}"
 pp_eval_data="${pp_eval_data:-wikitext2}"
-downstream_task_data="${downstream_task_data:-/data/shuozhe/saved_dataset/MetaMathQA-math-500/test.parquet}"
+downstream_task_data="${downstream_task_data:-dataset/mathqa500/test.parquet}"
 downstream_prompt_key="${downstream_prompt_key:-prompt}"
 downstream_response_key="${downstream_response_key:-}"
 downstream_reward_score_dir="${downstream_reward_score_dir:-}"
@@ -61,44 +98,20 @@ output_root="${output_root:-out/deepseek_r1_distill_qwen_1.5b}"
 # 3. Which stages to run
 # -----------------------------------------------------------------------------
 
-run_magnitude="${run_magnitude:-1}"
+run_magnitude="${run_magnitude:-0}"
 run_sparsegpt="${run_sparsegpt:-0}"
-run_wanda="${run_wanda:-0}"
+run_wanda="${run_wanda:-1}"
 run_random="${run_random:-0}"
 
-run_pp_eval="${run_pp_eval:-0}"
-run_downstream_eval="${run_downstream_eval:-1}"
+run_pp_eval="${run_pp_eval:-1}"
+run_downstream_eval="${run_downstream_eval:-0}"
 run_plots="${run_plots:-1}"
 
-save_score_pkl="${save_score_pkl:-0}"
+save_score_pkl="${save_score_pkl:-1}"
 clear_results="${clear_results:-1}"
 
 # plot_only=1 -> skip all pruning/eval, just regenerate plots for a run.
 plot_only="${plot_only:-0}"
-
-chosen_method_suffix() {
-    local methods=()
-    [ "$run_wanda" = "1" ] && methods+=(wanda)
-    [ "$run_magnitude" = "1" ] && methods+=(magnitude)
-    [ "$run_sparsegpt" = "1" ] && methods+=(sparsegpt)
-    [ "$run_random" = "1" ] && methods+=(random)
-    if [ "${#methods[@]}" -eq 0 ]; then
-        echo "no_methods"
-    else
-        local IFS="_"
-        echo "${methods[*]}"
-    fi
-}
-
-default_run_name() {
-    local methods
-    methods="$(chosen_method_suffix)"
-    if [ -n "${SLURM_JOB_ID:-}" ]; then
-        echo "${SLURM_JOB_ID}_${methods}"
-    else
-        echo "$(date +%Y%m%d_%H%M%S)_${methods}"
-    fi
-}
 
 if [ "$plot_only" = "1" ] && [ -z "${run_name:-}" ]; then
     # No run_name given while plot-only -> use the most recently created run dir.
@@ -109,7 +122,7 @@ if [ "$plot_only" = "1" ] && [ -z "${run_name:-}" ]; then
     fi
     run_name="$(basename "$latest_run_root")"
 else
-    run_name="${run_name:-$(default_run_name)}"
+    run_name="${run_name:-$(date +%Y%m%d_%H%M%S)}"
 fi
 
 run_dir="$output_root/$run_name"
@@ -128,13 +141,16 @@ seed="${seed:-42}"
 seq_len="${seq_len:-8192}"
 pp_seqlen="${pp_seqlen:-8192}"
 
-sparsity_ratios="${sparsity_ratios:-0 0.1 0.2 0.3 0.4 0.5}"
+sparsity_ratios="${sparsity_ratios:-0 0.1 0.2 0.3 0.4 0.5 0.6 0.7 0.8 0.9}"
 score_orders="${score_orders:-per_op local global}"
 prune_ops="${prune_ops:-}"          # empty = all ops
 
-calib_forward_batch_size="${calib_forward_batch_size:-128}"
-wanda_calib_forward_batch_size="${wanda_calib_forward_batch_size:-128}"
+calib_forward_batch_size="${calib_forward_batch_size:-1}"
+wanda_calib_forward_batch_size="${wanda_calib_forward_batch_size:-1}"
 wanda_activation_chunk_size="${wanda_activation_chunk_size:-2048}"
+wanda_save_activation_stats="${wanda_save_activation_stats:-0}"
+wanda_activation_stats_bins="${wanda_activation_stats_bins:-256}"
+wanda_activation_stats_dir="${wanda_activation_stats_dir:-}"
 sparsegpt_calib_forward_batch_size="${sparsegpt_calib_forward_batch_size:-128}"
 sparsegpt_hessian_chunk_size="${sparsegpt_hessian_chunk_size:-2048}"
 
@@ -145,23 +161,16 @@ model_dtype="${model_dtype:-auto}"
 # 5. Downstream eval parameters
 # -----------------------------------------------------------------------------
 downstream_backend="${downstream_backend:-vllm}"
-vllm_tensor_parallel_size="${vllm_tensor_parallel_size:-2}"
-# if [ -z "${vllm_tensor_parallel_size:-}" ]; then
-#     if command -v nvidia-smi >/dev/null 2>&1; then
-#         vllm_tensor_parallel_size="$(nvidia-smi -L 2>/dev/null | wc -l | tr -d ' ')"
-#     else
-#         vllm_tensor_parallel_size="1"
-#     fi
-#     [ "${vllm_tensor_parallel_size:-0}" -ge 1 ] 2>/dev/null || vllm_tensor_parallel_size="1"
-# fi
+vllm_tensor_parallel_size="${vllm_tensor_parallel_size:-1}"
 vllm_gpu_memory_utilization="${vllm_gpu_memory_utilization:-0.7}"
 vllm_dtype="${vllm_dtype:-auto}"
+vllm_python="${vllm_python:-}"
 
 downstream_max_examples="${downstream_max_examples:-500}"
 downstream_start_index="${downstream_start_index:-0}"
 downstream_shuffle="${downstream_shuffle:-0}"
-downstream_batch_size="${downstream_batch_size:-32}"
-downstream_generation_max_batch_tokens="${downstream_generation_max_batch_tokens:-32768}"
+downstream_batch_size="${downstream_batch_size:-64}"
+downstream_generation_max_batch_tokens="${downstream_generation_max_batch_tokens:-491520}"
 downstream_use_cache="${downstream_use_cache:-1}"
 downstream_max_prompt_length="${downstream_max_prompt_length:-2048}"
 downstream_max_new_tokens="${downstream_max_new_tokens:-8192}"
@@ -206,6 +215,15 @@ build_prune_ops_flags() {
     fi
 }
 
+build_wanda_activation_stats_flags() {
+    [ "$wanda_save_activation_stats" = "1" ] || return 0
+    echo "--wanda_save_activation_stats"
+    echo "--wanda_activation_stats_bins $wanda_activation_stats_bins"
+    if [ -n "$wanda_activation_stats_dir" ]; then
+        echo "--wanda_activation_stats_dir $wanda_activation_stats_dir"
+    fi
+}
+
 build_downstream_eval_flags() {
     [ "$run_downstream_eval" = "1" ] || return 0
 
@@ -231,6 +249,7 @@ build_downstream_eval_flags() {
 
     [ -n "$downstream_response_key" ] && flags+=(--downstream_response_key "$downstream_response_key")
     [ -n "$downstream_reward_score_dir" ] && flags+=(--downstream_reward_score_dir "$downstream_reward_score_dir")
+    [ -n "$vllm_python" ] && flags+=(--vllm_python "$vllm_python")
     [ "$save_pruned_model" = "1" ] && flags+=(--save_pruned_model)
     [ -n "$pruned_model_root" ] && flags+=(--pruned_model_root "$pruned_model_root")
     [ "$downstream_shuffle" = "1" ] && flags+=(--downstream_shuffle)
@@ -285,9 +304,11 @@ run_method() {
 
     # Assemble the conditional flag groups into arrays.
     local prune_ops_flags=()
+    local wanda_activation_stats_flags=()
     local pp_eval_flags=()
     local downstream_flags=()
     while IFS= read -r line; do [ -n "$line" ] && prune_ops_flags+=($line); done < <(build_prune_ops_flags)
+    while IFS= read -r line; do [ -n "$line" ] && wanda_activation_stats_flags+=($line); done < <(build_wanda_activation_stats_flags)
     while IFS= read -r line; do [ -n "$line" ] && pp_eval_flags+=("$line"); done < <(build_pp_eval_flags)
     while IFS= read -r line; do [ -n "$line" ] && downstream_flags+=("$line"); done < <(build_downstream_eval_flags)
 
@@ -310,6 +331,7 @@ run_method() {
         --sparsity_ratio $sparsity_ratios \
         --score_order $score_orders \
         "${prune_ops_flags[@]}" \
+        "${wanda_activation_stats_flags[@]}" \
         "$(build_score_pkl_flag)" \
         "${pp_eval_flags[@]}" \
         "${downstream_flags[@]}" \
@@ -357,9 +379,13 @@ echo "PPL eval data:          $pp_eval_data"
 echo "Prune ops:              ${prune_ops:-all}"
 echo "Downstream eval enabled: $run_downstream_eval"
 echo "Downstream backend:      $downstream_backend"
+echo "CUDA_VISIBLE_DEVICES:    ${CUDA_VISIBLE_DEVICES:-unset}"
+echo "GPU device selection:    $gpu_device"
 echo "Model device:           $model_device"
 echo "Model dtype:            $model_dtype"
+echo "WANDA calib batch size: $wanda_calib_forward_batch_size"
 echo "WANDA activation chunk: $wanda_activation_chunk_size"
+echo "WANDA activation stats: $wanda_save_activation_stats"
 echo "WANDA save dir:         $wanda_save_dir"
 echo "Magnitude save dir:     $magnitude_save_dir"
 echo "SparseGPT save dir:     $sparsegpt_save_dir"
