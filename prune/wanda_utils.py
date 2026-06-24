@@ -1,4 +1,4 @@
-import json
+import pickle
 from pathlib import Path
 
 import numpy as np
@@ -33,37 +33,38 @@ def wanda_activation_norm(scaler_row):
     return scaler_row.detach().float().clamp_min(0).sqrt()
 
 
-def save_wanda_activation_norm_stats(layer_idx, norm_by_name, output_dir, bins=256, metadata=None):
+def save_wanda_activation_norm_artifacts(layer_idx, norm_by_name, output_dir, bins=256, metadata=None):
     output_dir = Path(output_dir) / "wanda_activation_norms"
     output_dir.mkdir(parents=True, exist_ok=True)
 
     names = list(norm_by_name)
-    values = [norm_by_name[name].detach().float().cpu().numpy().reshape(-1) for name in names]
-    merged = np.concatenate(values)
+    values = [norm_by_name[name].detach().float().cpu().numpy().reshape(1, -1) for name in names]
+    flat_values = [value.reshape(-1) for value in values]
+    merged = np.concatenate(flat_values)
     max_value = float(merged.max(initial=0.0))
     bin_edges = np.linspace(0.0, max_value if max_value > 0 else 1.0, int(bins) + 1, dtype=np.float32)
-    hist_counts = np.stack([np.histogram(value, bins=bin_edges)[0] for value in values]).astype(np.int64)
+    hist_counts = np.stack([np.histogram(value, bins=bin_edges)[0] for value in flat_values]).astype(np.int64)
 
-    quantile_probs = np.array([0.0, 0.01, 0.05, 0.25, 0.5, 0.75, 0.95, 0.99, 1.0], dtype=np.float32)
-    quantiles = np.stack([np.quantile(value, quantile_probs) for value in values]).astype(np.float32)
-    summary_names = np.array(["mean", "std", "min", "max"])
-    summary = np.array(
-        [[value.mean(), value.std(), value.min(), value.max()] for value in values],
-        dtype=np.float32,
-    )
-
-    npz_path = output_dir / f"layer_{layer_idx:03d}.npz"
-    np.savez_compressed(
-        npz_path,
-        op_names=np.array(names),
-        bin_edges=bin_edges,
-        hist_counts=hist_counts,
-        quantile_probs=quantile_probs,
-        quantiles=quantiles,
-        summary_names=summary_names,
-        summary=summary,
-        metadata=json.dumps(metadata or {}),
-    )
+    pkl_path = output_dir / f"layer_{layer_idx:03d}_input_norm.pkl"
+    with pkl_path.open("wb") as f:
+        pickle.dump(
+            {
+                "layer_idx": int(layer_idx),
+                "op_names": names,
+                "norms": {
+                    name: value.astype(np.float32, copy=False)
+                    for name, value in zip(names, values)
+                },
+                "bin_edges": bin_edges,
+                "hist_counts": {
+                    name: counts
+                    for name, counts in zip(names, hist_counts)
+                },
+                "metadata": metadata or {},
+            },
+            f,
+            protocol=pickle.HIGHEST_PROTOCOL,
+        )
 
     import matplotlib
 
@@ -85,10 +86,11 @@ def save_wanda_activation_norm_stats(layer_idx, norm_by_name, output_dir, bins=2
     ax.legend(fontsize="small")
     fig.tight_layout()
 
-    png_path = output_dir / f"layer_{layer_idx:03d}.png"
-    fig.savefig(png_path, dpi=160)
+    hist_png_path = output_dir / f"layer_{layer_idx:03d}_hist.png"
+    fig.savefig(hist_png_path, dpi=160)
     plt.close(fig)
-    return npz_path, png_path
+
+    return pkl_path, hist_png_path
 
 
 def layer_forward(model, layer, hidden_states, attention_mask, position_ids):

@@ -7,7 +7,7 @@ from prune.wanda_utils import (
     WrappedGPT,
     calibration_batch_tensor,
     layer_forward,
-    save_wanda_activation_norm_stats,
+    save_wanda_activation_norm_artifacts,
     wanda_activation_norm,
 )
 from utils.score_io_utils import save_layer_scores_pkl
@@ -36,7 +36,10 @@ def compute_wanda_scores(args, model, tokenizer, device=torch.device("cuda:0"), 
         del dataloader
 
         layers = model.model.layers
-        wanda_scores = [] if save_dir is None else None
+        need_scores = save_dir is not None or not (
+            getattr(args, "skip_pp_eval", False) and not getattr(args, "do_downstream_eval", False)
+        )
+        wanda_scores = [] if save_dir is None and need_scores else None
         batch_size = max(1, int(getattr(args, "calib_forward_batch_size", 1)))
 
         for layer_idx, layer in enumerate(tqdm(layers, desc="WANDA score layers", unit="layer")):
@@ -101,21 +104,23 @@ def compute_wanda_scores(args, model, tokenizer, device=torch.device("cuda:0"), 
                 for handle in handles:
                     handle.remove()
 
-            layer_scores = {}
             activation_norms = {}
+            layer_scores = {} if need_scores else None
             for name, module in subset.items():
-                print(f"collecting WANDA scores layer {layer_idx} name {name}")
-                weight_cpu = module.weight.detach().float().cpu()
                 scaler_cpu = wrapped_layers[name].scaler_row.detach().float().cpu()
                 activation_norm = wanda_activation_norm(scaler_cpu)
-                layer_scores[name] = weight_cpu.abs() * activation_norm.reshape((1, -1))
                 if getattr(args, "wanda_save_activation_stats", False):
                     activation_norms[name] = activation_norm
-                del weight_cpu, scaler_cpu, activation_norm
+                if need_scores:
+                    print(f"collecting WANDA scores layer {layer_idx} name {name}")
+                    weight_cpu = module.weight.detach().float().cpu()
+                    layer_scores[name] = weight_cpu.abs() * activation_norm.reshape((1, -1))
+                    del weight_cpu
+                del scaler_cpu, activation_norm
 
             if getattr(args, "wanda_save_activation_stats", False):
                 stats_dir = getattr(args, "wanda_activation_stats_dir", None) or save_dir or args.save
-                stats_path, plot_path = save_wanda_activation_norm_stats(
+                input_norm_path, hist_plot_path = save_wanda_activation_norm_artifacts(
                     layer_idx,
                     activation_norms,
                     stats_dir,
@@ -127,26 +132,30 @@ def compute_wanda_scores(args, model, tokenizer, device=torch.device("cuda:0"), 
                         "score_layout": "input_hidden",
                     },
                 )
-                print(f"saved WANDA activation norm stats for layer {layer_idx} to {stats_path} and {plot_path}")
+                print(
+                    f"saved WANDA input norm artifacts for layer {layer_idx} to "
+                    f"{input_norm_path} and {hist_plot_path}"
+                )
 
-            save_path = save_layer_scores_pkl(
-                layer_idx,
-                layer_scores,
-                save_dir,
-                method="wanda",
-                metadata={
-                    "score_layout": "weight_out_in",
-                    "calib_data": args.calib_data,
-                    "nsamples": args.nsamples,
-                    "seqlen": model.seqlen,
-                },
-            )
-            if save_path is not None:
-                print(f"saved layer {layer_idx} WANDA scores to {save_path}")
+            if need_scores:
+                save_path = save_layer_scores_pkl(
+                    layer_idx,
+                    layer_scores,
+                    save_dir,
+                    method="wanda",
+                    metadata={
+                        "score_layout": "weight_out_in",
+                        "calib_data": args.calib_data,
+                        "nsamples": args.nsamples,
+                        "seqlen": model.seqlen,
+                    },
+                )
+                if save_path is not None:
+                    print(f"saved layer {layer_idx} WANDA scores to {save_path}")
 
             if wanda_scores is not None:
                 wanda_scores.append(layer_scores)
-            else:
+            elif layer_scores is not None:
                 del layer_scores
             inps, outs = outs, inps
             del wrapped_layers, handles, activation_norms

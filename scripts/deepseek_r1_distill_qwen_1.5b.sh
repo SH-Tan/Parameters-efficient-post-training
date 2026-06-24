@@ -99,15 +99,15 @@ output_root="${output_root:-out/deepseek_r1_distill_qwen_1.5b}"
 # -----------------------------------------------------------------------------
 
 run_magnitude="${run_magnitude:-0}"
-run_sparsegpt="${run_sparsegpt:-0}"
+run_sparsegpt="${run_sparsegpt:-1}"
 run_wanda="${run_wanda:-1}"
 run_random="${run_random:-0}"
 
 run_pp_eval="${run_pp_eval:-0}"
-run_downstream_eval="${run_downstream_eval:-0}"
+run_downstream_eval="${run_downstream_eval:-1}"
 run_plots="${run_plots:-0}"
 
-save_score_pkl="${save_score_pkl:-1}"
+save_score_pkl="${save_score_pkl:-0}"
 clear_results="${clear_results:-1}"
 
 # plot_only=1 -> skip all pruning/eval, just regenerate plots for a run.
@@ -141,14 +141,14 @@ seed="${seed:-42}"
 seq_len="${seq_len:-8192}"
 pp_seqlen="${pp_seqlen:-8192}"
 
-sparsity_ratios="${sparsity_ratios:-0 0.1 0.2 0.3 0.4 0.5 0.6 0.7 0.8 0.9}"
+sparsity_ratios="${sparsity_ratios:-0 0.1 0.2 0.3 0.4 0.5 0.6}"
 score_orders="${score_orders:-per_op local global}"
 prune_ops="${prune_ops:-}"          # empty = all ops
 
 calib_forward_batch_size="${calib_forward_batch_size:-1}"
 wanda_calib_forward_batch_size="${wanda_calib_forward_batch_size:-1}"
 wanda_activation_chunk_size="${wanda_activation_chunk_size:-2048}"
-wanda_save_activation_stats="${wanda_save_activation_stats:-1}"
+wanda_save_activation_stats="${wanda_save_activation_stats:-0}"
 wanda_activation_stats_bins="${wanda_activation_stats_bins:-256}"
 wanda_activation_stats_dir="${wanda_activation_stats_dir:-}"
 sparsegpt_calib_forward_batch_size="${sparsegpt_calib_forward_batch_size:-128}"
@@ -173,7 +173,7 @@ downstream_batch_size="${downstream_batch_size:-64}"
 downstream_generation_max_batch_tokens="${downstream_generation_max_batch_tokens:-491520}"
 downstream_use_cache="${downstream_use_cache:-1}"
 downstream_max_prompt_length="${downstream_max_prompt_length:-2048}"
-downstream_max_new_tokens="${downstream_max_new_tokens:-8192}"
+downstream_max_new_tokens="${downstream_max_new_tokens:-4096}"
 downstream_temperature="${downstream_temperature:-0.0}"
 downstream_top_p="${downstream_top_p:-1.0}"
 downstream_top_k="${downstream_top_k:-0}"
@@ -309,6 +309,9 @@ run_method() {
     local downstream_flags=()
     while IFS= read -r line; do [ -n "$line" ] && prune_ops_flags+=($line); done < <(build_prune_ops_flags)
     while IFS= read -r line; do [ -n "$line" ] && wanda_activation_stats_flags+=($line); done < <(build_wanda_activation_stats_flags)
+    if [ "$method" = "wanda" ] && [ "$wanda_save_activation_stats" = "1" ] && [ -z "$wanda_activation_stats_dir" ]; then
+        wanda_activation_stats_flags+=(--wanda_activation_stats_dir "$method_save_dir/$calib_result_name/seq_len_$seq_len")
+    fi
     while IFS= read -r line; do [ -n "$line" ] && pp_eval_flags+=("$line"); done < <(build_pp_eval_flags)
     while IFS= read -r line; do [ -n "$line" ] && downstream_flags+=("$line"); done < <(build_downstream_eval_flags)
 
@@ -386,6 +389,7 @@ echo "Model dtype:            $model_dtype"
 echo "WANDA calib batch size: $wanda_calib_forward_batch_size"
 echo "WANDA activation chunk: $wanda_activation_chunk_size"
 echo "WANDA activation stats: $wanda_save_activation_stats"
+echo "Save score PKL:         $save_score_pkl"
 echo "WANDA save dir:         $wanda_save_dir"
 echo "Magnitude save dir:     $magnitude_save_dir"
 echo "SparseGPT save dir:     $sparsegpt_save_dir"
