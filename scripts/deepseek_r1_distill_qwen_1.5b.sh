@@ -52,7 +52,7 @@ log_stage() {
 
 model="${model:-deepseek-ai/DeepSeek-R1-Distill-Qwen-1.5B}"
 cache_dir="${cache_dir:-llm_weights}"
-calib_data="${calib_data:-dataset/deepseek1.5b/dsk_1d5_8192.parquet}"
+calib_data="${calib_data:-c4}"
 pp_eval_data="${pp_eval_data:-wikitext2}"
 downstream_task_data="${downstream_task_data:-dataset/mathqa500/test.parquet}"
 downstream_prompt_key="${downstream_prompt_key:-prompt}"
@@ -64,9 +64,9 @@ output_root="${output_root:-out/deepseek_r1_distill_qwen_1.5b}"
 # 3. Which stages to run
 # -----------------------------------------------------------------------------
 
-run_magnitude="${run_magnitude:-0}"
+run_magnitude="${run_magnitude:-1}"
 run_sparsegpt="${run_sparsegpt:-1}"
-run_wanda="${run_wanda:-0}"
+run_wanda="${run_wanda:-1}"
 run_random="${run_random:-0}"
 
 run_pp_eval="${run_pp_eval:-0}"
@@ -105,9 +105,9 @@ random_save_dir="${random_save_dir:-$run_dir/random}"
 nsamples="${nsamples:-128}"
 seed="${seed:-42}"
 seq_len="${seq_len:-8192}"
-pp_seqlen="${pp_seqlen:-2048}"
+pp_seqlen="${pp_seqlen:-8192}"
 
-sparsity_ratios="${sparsity_ratios:-0 0.1 0.2 0.3 0.4 0.5 0.6 0.7}"
+sparsity_ratios="${sparsity_ratios:-0 0.1 0.2 0.3 0.4 0.5 0.6}"
 score_orders="${score_orders:-per_op}"
 prune_ops="${prune_ops:-}"          # empty = all ops
 
