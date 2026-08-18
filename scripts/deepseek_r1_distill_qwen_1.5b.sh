@@ -52,7 +52,7 @@ log_stage() {
 
 model="${model:-deepseek-ai/DeepSeek-R1-Distill-Qwen-1.5B}"
 cache_dir="${cache_dir:-llm_weights}"
-calib_data="${calib_data:-c4}"
+calib_data="${calib_data:-dataset/deepseek1.5b/dsk_1d5_8192.parquet}"
 pp_eval_data="${pp_eval_data:-wikitext2}"
 downstream_task_data="${downstream_task_data:-dataset/mathqa500/test.parquet}"
 downstream_prompt_key="${downstream_prompt_key:-prompt}"
@@ -64,13 +64,13 @@ output_root="${output_root:-out/deepseek_r1_distill_qwen_1.5b}"
 # 3. Which stages to run
 # -----------------------------------------------------------------------------
 
-run_magnitude="${run_magnitude:-1}"
+run_magnitude="${run_magnitude:-0}"
 run_sparsegpt="${run_sparsegpt:-1}"
 run_wanda="${run_wanda:-1}"
 run_random="${run_random:-0}"
 
-run_pp_eval="${run_pp_eval:-0}"
-run_downstream_eval="${run_downstream_eval:-1}"
+run_pp_eval="${run_pp_eval:-1}"
+run_downstream_eval="${run_downstream_eval:-0}"
 run_plots="${run_plots:-1}"
 
 save_score_pkl="${save_score_pkl:-0}"
@@ -108,7 +108,7 @@ seq_len="${seq_len:-8192}"
 pp_seqlen="${pp_seqlen:-8192}"
 
 sparsity_ratios="${sparsity_ratios:-0 0.1 0.2 0.3 0.4 0.5 0.6}"
-score_orders="${score_orders:-per_op}"
+score_orders="${score_orders:-per_op local global}"
 prune_ops="${prune_ops:-}"          # empty = all ops
 
 calib_forward_batch_size="${calib_forward_batch_size:-128}"
@@ -121,7 +121,7 @@ model_device="${model_device:-auto_free}"
 # -----------------------------------------------------------------------------
 # 5. Downstream eval parameters
 # -----------------------------------------------------------------------------
-downstream_backend="${downstream_backend:-vllm}"
+downstream_backend="${downstream_backend:-transformer}"
 vllm_tensor_parallel_size="${vllm_tensor_parallel_size:-1}"
 vllm_gpu_memory_utilization="${vllm_gpu_memory_utilization:-0.7}"
 vllm_dtype="${vllm_dtype:-auto}"

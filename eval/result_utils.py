@@ -1,4 +1,5 @@
 import csv
+import glob
 import os
 
 
@@ -151,6 +152,22 @@ def _filtered_points(rows, method=None, score_order=None, pp_seq_len=None, max_s
     return sorted(points)
 
 
+def _label_from_result_csv(csv_path):
+    parts = csv_path.split(os.sep)
+    try:
+        result_index = parts.index("results")
+    except ValueError:
+        return os.path.basename(os.path.dirname(csv_path))
+    if result_index + 1 >= len(parts):
+        return "dataset"
+    label = parts[result_index + 1]
+    if label.startswith("dataset__"):
+        label = label[len("dataset__") :]
+    if label.endswith(".parquet"):
+        label = label[: -len(".parquet")]
+    return label.replace("__", "/")
+
+
 def _filtered_accuracy_points(rows, method=None, score_order=None, max_sparsity=None):
     points = []
     for row in rows:
@@ -280,6 +297,103 @@ def draw_method_comparisons(
         )
         if drawn_path is not None:
             drawn_paths.append(drawn_path)
+    return drawn_paths
+
+
+def draw_combined_ppl_comparisons(
+    run_roots,
+    output_dir,
+    methods=("wanda", "magnitude", "sparsegpt", "random"),
+    score_orders=("global", "local", "per_op"),
+    max_sparsity=0.5,
+    pp_seq_len=None,
+):
+    try:
+        import matplotlib.pyplot as plt
+        from matplotlib.lines import Line2D
+    except ImportError:
+        print("matplotlib is not installed; skipping plot.")
+        return []
+
+    dataset_rows = []
+    for run_root in run_roots:
+        for csv_path in glob.glob(os.path.join(run_root, "*", "results", "*", "seq_len_*", "pp_eval_results.csv")):
+            rows = load_result_rows(csv_path)
+            if rows:
+                dataset_rows.append((_label_from_result_csv(csv_path), rows))
+
+    if not dataset_rows:
+        return []
+
+    method_colors = {}
+    color_cycle = plt.rcParams["axes.prop_cycle"].by_key().get("color", [])
+    for index, method in enumerate(methods):
+        method_colors[method] = color_cycle[index % len(color_cycle)] if color_cycle else None
+
+    dataset_labels = sorted({label for label, _ in dataset_rows})
+    linestyles = ["-", "--", "-.", ":"]
+    dataset_styles = {
+        label: linestyles[index % len(linestyles)]
+        for index, label in enumerate(dataset_labels)
+    }
+
+    os.makedirs(output_dir, exist_ok=True)
+    drawn_paths = []
+    for score_order in score_orders:
+        plotted = False
+        plt.figure(figsize=(8.2, 5.0), dpi=180)
+        for dataset_label, rows in dataset_rows:
+            for method in methods:
+                points = _filtered_points(
+                    rows,
+                    method=method,
+                    score_order=score_order,
+                    pp_seq_len=pp_seq_len,
+                    max_sparsity=max_sparsity,
+                )
+                if not points:
+                    continue
+                plotted = True
+                xs = [point[0] for point in points]
+                ys = [point[1] for point in points]
+                plt.plot(
+                    xs,
+                    ys,
+                    marker="o",
+                    linewidth=1.8,
+                    color=method_colors.get(method),
+                    linestyle=dataset_styles[dataset_label],
+                    label=f"{method} - {dataset_label}",
+                )
+
+        if not plotted:
+            plt.close()
+            continue
+
+        method_handles = [
+            Line2D([0], [0], color=method_colors.get(method), marker="o", linewidth=1.8, label=method)
+            for method in methods
+            if method_colors.get(method) is not None
+        ]
+        dataset_handles = [
+            Line2D([0], [0], color="black", linestyle=dataset_styles[label], linewidth=1.8, label=label)
+            for label in dataset_labels
+        ]
+
+        plt.yscale("log")
+        plt.xlabel("Target sparsity")
+        plt.ylabel("Perplexity, log scale")
+        title_seq = f", pp_seq_len={pp_seq_len}" if pp_seq_len is not None else ""
+        plt.title(f"{score_order} PPL comparison{title_seq}")
+        plt.grid(True, which="both", linewidth=0.4, alpha=0.35)
+        first_legend = plt.legend(handles=method_handles, title="Method", fontsize=8, title_fontsize=8, loc="upper left")
+        plt.gca().add_artist(first_legend)
+        plt.legend(handles=dataset_handles, title="Dataset", fontsize=8, title_fontsize=8, loc="upper right")
+        plt.tight_layout()
+        plot_path = os.path.join(output_dir, f"{score_order}_combined_ppl_to_{max_sparsity:g}.png")
+        plt.savefig(plot_path)
+        plt.close()
+        drawn_paths.append(plot_path)
     return drawn_paths
 
 
